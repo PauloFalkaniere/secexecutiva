@@ -719,6 +719,8 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     sortAsc: '<path d="M7 4v16"/><path d="M4 7l3-3 3 3"/><path d="M13 8h7"/><path d="M13 13h5"/><path d="M13 18h3"/>',
     sortDesc: '<path d="M7 20V4"/><path d="M4 17l3 3 3-3"/><path d="M13 6h3"/><path d="M13 11h5"/><path d="M13 16h7"/>',
     filter: '<path d="M4 5h16l-6.5 7.5v5.5l-3 1.5v-7z"/>',
+    shield: '<path d="M12 3l7 3v6c0 5-3.5 8-7 9-3.5-1-7-4-7-9V6z"/><path d="M9 12l2 2 4-4"/>',
+    target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="0.6"/>',
   };
   function icon(name, size){
     size = size || 15;
@@ -1244,6 +1246,8 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     reunioes: [],
     tarefas: [],
     comissaoExecutiva: [],
+    conselhoFiscal: [],
+    comiteGestor: { membro1: "", membro2: "" },
     secretariasCausas: [],
     comissoesPermanentes: [],
     comissoesEspeciais: [],
@@ -1487,9 +1491,12 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     if (tipo === "supremo") return 4;
     return 1;
   }
-  function mandatoAnoTexto(ano, anos){
-    const anoIni = Number(ano) || null;
-    if (!anoIni) return "";
+  /* "ano" aqui é sempre o ANO DA ELEIÇÃO — o mandato começa no ano
+     seguinte (ex.: eleito em 2025, cumpre o mandato a partir de 2026). */
+  function mandatoAnoTexto(anoEleicao, anos){
+    const anoEl = Number(anoEleicao) || null;
+    if (!anoEl) return "";
+    const anoIni = anoEl + 1;
     return anos > 1 ? `${anoIni}–${anoIni + anos}` : `${anoIni}`;
   }
 
@@ -2348,7 +2355,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       const nomeSinodo = cfg.siglaSinodo || cfg.nomeSinodo || "Sínodo";
       return `
         <div>
-          <p class="empty-note" style="margin:0 0 10px;">Registre aqui a eleição de membros da Comissão Executiva, de delegados ao Supremo Concílio e de delegados ao ${esc(nomeSinodo)} ocorrida nesta reunião. O resultado aparece na etiqueta de presença do eleito.</p>
+          <p class="empty-note" style="margin:0 0 10px;">Registre aqui a eleição de membros da Comissão Executiva, de delegados ao Supremo Concílio e de delegados ao ${esc(nomeSinodo)} ocorrida nesta reunião. O resultado aparece na etiqueta de presença do eleito. O campo de ano é o ano da eleição — o mandato começa no ano seguinte.</p>
           <div style="display:grid; grid-template-columns:1.3fr 1fr 90px 1.4fr auto; gap:8px; margin-bottom:10px; align-items:center;">
             <select data-eleicao-tipo="${r.id}">
               <option value="executiva" ${draft.tipo==="executiva"?"selected":""}>Comissão Executiva</option>
@@ -3260,19 +3267,19 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     function renderExecutiva(container){
       const list = execList();
       container.innerHTML = `
-        <p class="section-sub" style="margin:-4px 0 14px;">A Comissão Executiva atua em nome do presbitério nos intervalos entre as reuniões plenárias. Os mandatos são anuais, exceto o de Secretário Executivo, que dura três anos. Eleições também podem ser registradas diretamente na sub-aba "Eleição" de cada reunião.</p>
+        <p class="section-sub" style="margin:-4px 0 14px;">A Comissão Executiva atua em nome do presbitério nos intervalos entre as reuniões plenárias. Os mandatos são anuais, exceto o de Secretário Executivo, que dura três anos, e começam no ano seguinte ao da eleição (eleito em 2025, cumpre o mandato a partir de 2026). Eleições também podem ser registradas diretamente na sub-aba "Eleição" de cada reunião.</p>
         <div style="display:grid; grid-template-columns:1.2fr 1.6fr 90px auto; gap:8px; margin-bottom:14px;">
           <select id="ex-cargo">${CARGOS_EXECUTIVOS.map(c => `<option ${formExecutiva.cargo===c?"selected":""}>${esc(c)}</option>`).join("")}</select>
           <select id="ex-nome"><option value="">Selecionar membro efetivo...</option>${membrosEfetivosGlobais().map(nm => `<option value="${esc(nm)}" ${formExecutiva.nome===nm?"selected":""}>${esc(nm)}</option>`).join("")}</select>
-          <input type="number" placeholder="Ano" id="ex-ano" value="${esc(formExecutiva.ano)}">
+          <input type="number" placeholder="Ano da eleição" title="Ano em que a pessoa foi eleita — o mandato começa no ano seguinte" id="ex-ano" value="${esc(formExecutiva.ano)}">
           <button class="btn btn-primary" id="ex-add">${icon("plus", 14)} Adicionar</button>
         </div>
         ${list.length === 0 ? '<p class="empty-note">Nenhum membro cadastrado ainda.</p>' : ""}
         <div class="list-col">
           ${list.map(m => {
             const anos = mandatoAnos(m.cargo);
-            const anoIni = Number(m.ano) || null;
-            const mandatoTexto = anoIni ? `Mandato ${anoIni}–${anoIni + anos} (${anos} ano${anos>1?"s":""})` : `Mandato de ${anos} ano${anos>1?"s":""}`;
+            const anoTexto = mandatoAnoTexto(m.ano, anos);
+            const mandatoTexto = anoTexto ? `Mandato ${anoTexto} (${anos} ano${anos>1?"s":""})` : `Mandato de ${anos} ano${anos>1?"s":""}`;
             return `
             <div class="row-card">
               <span style="display:flex; gap:10px; align-items:center;">${pillHtml(m.cargo || "—", "gold")} <b>${esc(m.nome)}</b> <span style="color:var(--muted); font-size:11.5px;">${mandatoTexto}</span></span>
@@ -3287,6 +3294,97 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       container.querySelector("#ex-ano").addEventListener("input", e => formExecutiva.ano = e.target.value);
       container.querySelector("#ex-add").addEventListener("click", addExecutiva);
       container.querySelectorAll("[data-remove-exec]").forEach(el => el.addEventListener("click", () => removeExecutiva(el.getAttribute("data-remove-exec"))));
+    }
+
+    /* Quem ocupa hoje um cargo da Comissão Executiva: entre os registros
+       daquele cargo, o de ano (de eleição) mais recente. */
+    function execAtual(cargo){
+      const candidatos = execList().filter(m => m.cargo === cargo);
+      return candidatos.reduce((best, m) => (!best || Number(m.ano) >= Number(best.ano)) ? m : best, null);
+    }
+
+    /* -- conselho fiscal: 3 titulares e 3 suplentes, mesmo padrão de
+       seleção e mandato (ano da eleição) da Comissão Executiva -- */
+    let formFiscal = { condicao: "titular", nome: "", ano: String(new Date().getFullYear()) };
+    const fiscalList = () => STATE.conselhoFiscal || [];
+    function addFiscal(){ if(!formFiscal.nome.trim()) return; setSlice("conselhoFiscal", [...fiscalList(), { id: uid(), ...formFiscal }]); formFiscal = { condicao: formFiscal.condicao, nome: "", ano: formFiscal.ano }; renderActiveTab(); }
+    async function removeFiscal(id){ if(await confirmModal("Remover este membro do conselho fiscal?")) setSlice("conselhoFiscal", fiscalList().filter(m => m.id !== id)); }
+    function renderFiscal(container){
+      const list = fiscalList();
+      const titulares = list.filter(m => m.condicao === "titular");
+      const suplentes = list.filter(m => m.condicao === "suplente");
+      const grupoHtml = (titulo, membros) => `
+        <div style="margin-bottom:12px;">
+          <p class="field-label" style="margin-bottom:6px;">${titulo} (${membros.length})</p>
+          ${membros.length === 0 ? '<p class="empty-note" style="margin:0;">Nenhum membro cadastrado ainda.</p>' : `
+            <div class="list-col">
+              ${membros.map(m => {
+                const anoTexto = mandatoAnoTexto(m.ano, 1);
+                return `
+                <div class="row-card">
+                  <span style="display:flex; gap:10px; align-items:center;"><b>${esc(m.nome)}</b>${anoTexto ? `<span style="color:var(--muted); font-size:11.5px;">Mandato ${anoTexto}</span>` : ""}</span>
+                  <button class="btn-icon" data-remove-fiscal="${m.id}">${icon("trash", 15)}</button>
+                </div>
+              `;
+              }).join("")}
+            </div>
+          `}
+        </div>
+      `;
+      container.innerHTML = `
+        <p class="section-sub" style="margin:-4px 0 14px;">O Conselho Fiscal é composto por 3 membros titulares e 3 suplentes, eleitos pelo presbitério. O mandato começa no ano seguinte ao da eleição (eleito em 2025, cumpre o mandato a partir de 2026).</p>
+        <div style="display:grid; grid-template-columns:1fr 1.6fr 110px auto; gap:8px; margin-bottom:14px;">
+          <select id="cf-condicao">
+            <option value="titular" ${formFiscal.condicao==="titular"?"selected":""}>Titular</option>
+            <option value="suplente" ${formFiscal.condicao==="suplente"?"selected":""}>Suplente</option>
+          </select>
+          <select id="cf-nome"><option value="">Selecionar membro efetivo...</option>${membrosEfetivosGlobais().map(nm => `<option value="${esc(nm)}" ${formFiscal.nome===nm?"selected":""}>${esc(nm)}</option>`).join("")}</select>
+          <input type="number" placeholder="Ano da eleição" title="Ano em que a pessoa foi eleita — o mandato começa no ano seguinte" id="cf-ano" value="${esc(formFiscal.ano)}">
+          <button class="btn btn-primary" id="cf-add">${icon("plus", 14)} Adicionar</button>
+        </div>
+        ${grupoHtml("Titulares", titulares)}
+        ${grupoHtml("Suplentes", suplentes)}
+      `;
+      container.querySelector("#cf-condicao").addEventListener("change", e => formFiscal.condicao = e.target.value);
+      container.querySelector("#cf-nome").addEventListener("change", e => formFiscal.nome = e.target.value);
+      container.querySelector("#cf-ano").addEventListener("input", e => formFiscal.ano = e.target.value);
+      container.querySelector("#cf-add").addEventListener("click", addFiscal);
+      container.querySelectorAll("[data-remove-fiscal]").forEach(el => el.addEventListener("click", () => removeFiscal(el.getAttribute("data-remove-fiscal"))));
+    }
+
+    /* -- comitê gestor: sempre o presidente e o tesoureiro atuais da
+       Comissão Executiva (derivados automaticamente, nunca digitados
+       aqui) + 2 membros extras escolhidos entre os membros efetivos -- */
+    function renderGestor(container){
+      const cg = STATE.comiteGestor || { membro1: "", membro2: "" };
+      const presidente = execAtual("Presidente");
+      const tesoureiro = execAtual("Tesoureiro");
+      const membros = membrosEfetivosGlobais();
+      const linhaFixa = (label, m) => `
+        <div class="row-card">
+          <span style="display:flex; gap:10px; align-items:center;">${pillHtml(label, "gold")} ${m ? `<b>${esc(m.nome)}</b>` : `<span style="color:var(--muted); font-style:italic;">a definir</span>`}</span>
+          <span style="color:var(--muted); font-size:11px;">${m ? "definido pela Comissão Executiva" : "cadastre em Comissão executiva"}</span>
+        </div>
+      `;
+      container.innerHTML = `
+        <p class="section-sub" style="margin:-4px 0 14px;">O Comitê Gestor é composto sempre pelo Presidente e pelo Tesoureiro do presbitério (os mesmos da Comissão Executiva, atualizados automaticamente de lá) e mais 2 membros.</p>
+        <div class="list-col" style="margin-bottom:14px;">
+          ${linhaFixa("Presidente", presidente)}
+          ${linhaFixa("Tesoureiro", tesoureiro)}
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <div>
+            <label class="field-label">Membro</label>
+            <select id="cg-membro1"><option value="">Selecionar membro efetivo...</option>${membros.map(nm => `<option value="${esc(nm)}" ${cg.membro1===nm?"selected":""}>${esc(nm)}</option>`).join("")}</select>
+          </div>
+          <div>
+            <label class="field-label">Membro</label>
+            <select id="cg-membro2"><option value="">Selecionar membro efetivo...</option>${membros.map(nm => `<option value="${esc(nm)}" ${cg.membro2===nm?"selected":""}>${esc(nm)}</option>`).join("")}</select>
+          </div>
+        </div>
+      `;
+      container.querySelector("#cg-membro1").addEventListener("change", e => setSlice("comiteGestor", { ...(STATE.comiteGestor || {}), membro1: e.target.value }));
+      container.querySelector("#cg-membro2").addEventListener("change", e => setSlice("comiteGestor", { ...(STATE.comiteGestor || {}), membro2: e.target.value }));
     }
 
     /* -- secretarias de causas (apenas o secretário responsável, sem
@@ -3529,6 +3627,8 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     const CONFIG_SUBS = [
       { id: "geral", label: "Configurações gerais", icon: "gear", render: renderGeral },
       { id: "executiva", label: "Comissão executiva", icon: "user", render: renderExecutiva },
+      { id: "fiscal", label: "Conselho fiscal", icon: "shield", render: renderFiscal },
+      { id: "gestor", label: "Comitê gestor", icon: "target", render: renderGestor },
       { id: "membros", label: "Membros efetivos", icon: "users", render: renderMembrosEfetivos },
       { id: "candidatos", label: "Candidatos", icon: "graduation", render: renderCandidatos },
       { id: "secretarias", label: "Secretarias de causas", icon: "clipboard", render: renderSecretarias },
