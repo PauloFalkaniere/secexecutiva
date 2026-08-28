@@ -1,0 +1,5 @@
+// Configuração do Supabase — Secretaria Executiva
+//
+
+window.SECEX_SUPABASE_URL = "https://cwaluevdaawplruukbhe.supabase.co";
+window.SECEX_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN3YWx1ZXZkYWF3cGxydXVrYmhlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc4NjM1MjgsImV4cCI6MjEwMzQzOTUyOH0.VlILRQLo4iEMffE8cipmPmEM6RO6MYYo54O8on2j5q0";

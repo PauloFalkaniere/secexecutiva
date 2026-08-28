@@ -8,17 +8,14 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&family=Dancing+Script:wght@500;700&display=swap" rel="stylesheet">
 <!--
-  Configuração do banco de dados (Supabase). Preencha com os dados do
-  SEU projeto (veja o README.md do repositório para o passo a passo).
-  Deixando em branco, o sistema funciona normalmente no modo local
-  (dados salvos só neste navegador, sem login) — é o que acontece na
-  pré-visualização do artefato.
+  Configuração do banco de dados (Supabase): fica em config.js, um
+  arquivo separado deste (veja o README.md para o passo a passo). Assim,
+  quando você atualizar este index.html para uma versão nova do sistema,
+  suas chaves em config.js não são substituídas. Se config.js não
+  existir (como na pré-visualização do artefato), o sistema funciona
+  normalmente no modo local (dados salvos só neste navegador, sem login).
 -->
-
-<script>
- window.SECEX_SUPABASE_URL = "https://cwaluevdaawplruukbhe.supabase.co";
-  window.SECEX_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN3YWx1ZXZkYWF3cGxydXVrYmhlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc4NjM1MjgsImV4cCI6MjEwMzQzOTUyOH0.VlILRQLo4iEMffE8cipmPmEM6RO6MYYo54O8on2j5q0";
-</script>
+<script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   /* ============================================================
@@ -719,6 +716,9 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.6-4.6"/>',
     eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',
     stamp: '<path d="M8 4h8v5a3 3 0 003 3H5a3 3 0 003-3z"/><path d="M6 12v4h12v-4"/><path d="M4 20h16"/><path d="M9 20v-2.5M15 20v-2.5"/>',
+    sortAsc: '<path d="M7 4v16"/><path d="M4 7l3-3 3 3"/><path d="M13 8h7"/><path d="M13 13h5"/><path d="M13 18h3"/>',
+    sortDesc: '<path d="M7 20V4"/><path d="M4 17l3 3 3-3"/><path d="M13 6h3"/><path d="M13 11h5"/><path d="M13 16h7"/>',
+    filter: '<path d="M4 5h16l-6.5 7.5v5.5l-3 1.5v-7z"/>',
   };
   function icon(name, size){
     size = size || 15;
@@ -1232,22 +1232,13 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
   /* ============================================================
      Dados iniciais
      ============================================================ */
-  const PASTORES_INICIAIS = [
-    "Rev. Alexandre Lessa","Rev. Alexandre Kim","Rev. Bernardo Kyu Cho","Rev. Chun Kwang Chung",
-    "Rev. David Brito de Cerqueira","Rev. Gustavo Vilela Monteiro","Rev. Ismael de Jesus da Silva",
-    "Rev. Josimar Coelho de Miranda","Rev. Leandro Aparecido de Souza","Rev. Lucas Pereira Rezende",
-    "Rev. Luiz Henrique Portela Faria","Rev. Marcos Novaes Silva","Rev. Paulo Henrique Falkaniere Soares",
-    "Rev. Ronaldo Barboza De Vasconcelos","Rev. Samuel Bezerra Ribeiro","Rev. Sang Yeon Park","Rev. Thiago Atsushi Naruse",
-  ].map(nome => ({ id: uid(), nome, igreja: "", status: "Ativo", designacao: "Pastor Efetivo", campoAtuacao: "", agenciaMissionaria: "", cedidoPara: "" }));
-
-  const IGREJAS_INICIAIS = [
-    "IP da Aliança em São Paulo","IP do Alto da Lapa","IP Central de Embu das Artes",
-    "IP do Caminho","IP Metropolitana de Alphaville","IP Aliança Vinhedo",
-  ].map(nome => ({ id: uid(), nome, cidade: "", pastor: "", representante: "", suplentes: [] }));
-
+  // Toda conta nova começa vazia: os dados reais do presbitério (pastores,
+  // igrejas, documentos históricos, etc.) são carregados pelo script
+  // import_inicial.sql direto no banco de dados (Supabase) — veja o
+  // README.md — e não ficam mais fixos aqui no código.
   const DEFAULTS = {
-    pastores: PASTORES_INICIAIS,
-    igrejas: IGREJAS_INICIAIS,
+    pastores: [],
+    igrejas: [],
     candidatos: [],
     documentos: [],
     reunioes: [],
@@ -1258,7 +1249,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     comissoesEspeciais: [],
     delegadosSupremo: [],
     delegadosSinodo: [],
-    config: { nomePresbiterio: "Secretaria executiva", sigla: "SE", logoDataUrl: "", infoAdicional: "", secretarioNome: "", secretarioCargo: "Secretário Executivo", nomeSinodo: "", siglaSinodo: "", assinaturaTipo: "imagem", assinaturaImagemDataUrl: "", protocoloImportadoEm: "" },
+    config: { nomePresbiterio: "Secretaria executiva", sigla: "SE", logoDataUrl: "", infoAdicional: "", secretarioNome: "", secretarioCargo: "Secretário Executivo", nomeSinodo: "", siglaSinodo: "", assinaturaTipo: "imagem", assinaturaImagemDataUrl: "" },
   };
 
   const STATE = {};
@@ -1694,166 +1685,12 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
 
   /* @@TAB_INICIO@@ */
 
-  /* ---------- PROTOCOLO ---------- */
-  /* ============================================================
-     Importação do histórico de protocolo (planilha Word)
-     ============================================================ */
-  const IMPORT_PROTOCOLO_HISTORICO = [
-    { tipo: "Entrada", numero: "001/2025", assunto: "JUSTIFICATIVA DE AUSÊNCIA", origemNome: "Rev. Bernado Cho", reuniaoRef: "", dataRecebimento: "2025-04-01" },
-    { tipo: "Entrada", numero: "002/2025", assunto: "Justificativa de Ausência Reuniões 2025", origemNome: "Rev. Luiz Faria", reuniaoRef: "", dataRecebimento: "2025-04-05" },
-    { tipo: "Entrada", numero: "003/2025", assunto: "Relatório de Ministro", origemNome: "Rev. Paulo Falkaniere", reuniaoRef: "I RE-PPSP", dataRecebimento: "2025-04-16" },
-    { tipo: "Entrada", numero: "004/2025", assunto: "Relatório Estatística IPAL", origemNome: "IPAL", reuniaoRef: "I RE-PPSP", dataRecebimento: "2025-04-22" },
-    { tipo: "Entrada", numero: "005/2025", assunto: "Relatório Conselho IPAL", origemNome: "IPAL", reuniaoRef: "I RE-PPSP", dataRecebimento: "2025-04-22" },
-    { tipo: "Entrada", numero: "006/2025", assunto: "Relatório Geral IPAL", origemNome: "IPAL", reuniaoRef: "I RE-PPSP", dataRecebimento: "2025-04-22" },
-    { tipo: "Entrada", numero: "007/2025", assunto: "Rev. Lucas - 2024_Relatório de Ministro", origemNome: "Rev. Lucas Rezende", reuniaoRef: "I RE-PPSP", dataRecebimento: "2025-04-22" },
-    { tipo: "Entrada", numero: "008/2025", assunto: "Rev Tiago Naruse - Relatório de Pastores - 2024", origemNome: "Rev. Tiago Naruse", reuniaoRef: "I RE-PPSP", dataRecebimento: "2025-04-22" },
-    { tipo: "Entrada", numero: "009/2025", assunto: "Relatório Ministro IPB - Thiago Jeremias", origemNome: "Rev. Thiago Jeremias", reuniaoRef: "I RE-PPSP", dataRecebimento: "2025-04-22" },
-    { tipo: "Entrada", numero: "010/2025", assunto: "Relatório de Ministros - Sang Yeon Park 2025", origemNome: "Rev. Sang Y. Park", reuniaoRef: "I RE-PPSP", dataRecebimento: "2025-04-22" },
-    { tipo: "Entrada", numero: "011/2025", assunto: "Relatório 2023 – Rev. Samuel B. Ribeiro", origemNome: "Rev. Samuel B Ribeiro", reuniaoRef: "I RE-PPSP", dataRecebimento: "2025-04-22" },
-    { tipo: "Entrada", numero: "012/2025", assunto: "Relatório 2024 – Rev. Samuel B. Ribeiro", origemNome: "Rev. Samuel B Ribeiro", reuniaoRef: "I RE-PPSP", dataRecebimento: "2025-04-22" },
-    { tipo: "Entrada", numero: "013/2025", assunto: "Proposta de Horário Regimental", origemNome: "Rev. Samuel e Presb. Tiago", reuniaoRef: "I RE-PPSP", dataRecebimento: "2025-04-22" },
-    { tipo: "Entrada", numero: "014/2025", assunto: "Relatório Ministro – Luiz Henrique P. Faria", origemNome: "Rev. Luiz Henrique Faria", reuniaoRef: "I RE-PPSP", dataRecebimento: "2025-04-22" },
-    { tipo: "Entrada", numero: "015/2025", assunto: "Informação Quanto a Situação Pastoral da IP Aliança Vinhedo", origemNome: "IPAV", reuniaoRef: "I RE-PPSP", dataRecebimento: "2025-04-22" },
-    { tipo: "Entrada", numero: "016/2025", assunto: "Quadro de Oficiais da Aliança Vinhedo", origemNome: "IPAV", reuniaoRef: "I RE-PPSP", dataRecebimento: "2025-04-22" },
-    { tipo: "Entrada", numero: "017/2025", assunto: "Relatório Igreja – Conselho – Aliança Vinhedo", origemNome: "IPAV", reuniaoRef: "I RE-PPSP", dataRecebimento: "2025-04-22" },
-    { tipo: "Entrada", numero: "018/2025", assunto: "Relatório Igreja – Congregação – Aliança Vinhedo", origemNome: "IPAV", reuniaoRef: "I RE-PPSP", dataRecebimento: "2025-04-22" },
-    { tipo: "Entrada", numero: "019/2025", assunto: "Relatório Igreja – Estatistica – Aliança Vinhedo", origemNome: "IPAV", reuniaoRef: "I RE-PPSP", dataRecebimento: "2025-04-22" },
-    { tipo: "Entrada", numero: "020/2025", assunto: "Designação de Ministro – Rev. Ismael de Jesus", origemNome: "IPASP", reuniaoRef: "I RE-PPSP", dataRecebimento: "2025-04-22" },
-    { tipo: "Entrada", numero: "021/2025", assunto: "Credencial Presbíteros Reunião Ordinária Anual", origemNome: "IPASP", reuniaoRef: "I RE-PPSP", dataRecebimento: "2025-04-22" },
-    { tipo: "Entrada", numero: "022/2025", assunto: "Relatório do Conselho – IP do Caminho", origemNome: "IP do Caminho", reuniaoRef: "I RE-PPSP", dataRecebimento: "2025-04-22" },
-    { tipo: "Entrada", numero: "023/2025", assunto: "Relatório de Estatística – IP do Caminho", origemNome: "IP do Caminho", reuniaoRef: "I RE-PPSP", dataRecebimento: "2025-04-22" },
-    { tipo: "Entrada", numero: "024/2025", assunto: "Relatório de Estatística – IP Aliança SP", origemNome: "IPASP", reuniaoRef: "I RE-PPSP", dataRecebimento: "2025-04-22" },
-    { tipo: "Entrada", numero: "025/2025", assunto: "Relatório do Conselho – IP Aliança SP", origemNome: "IPASP", reuniaoRef: "I RE-PPSP", dataRecebimento: "2025-04-22" },
-    { tipo: "Entrada", numero: "026/2025", assunto: "Relatório de Ministro – Rev. Chun K. Chung", origemNome: "Rev. Chun K. Chung", reuniaoRef: "I SR-PPSP", dataRecebimento: "2025-04-22" },
-    { tipo: "Entrada", numero: "027/2025", assunto: "Sobre o estatuto e regimento interno", origemNome: "Sínodo São Paulo", reuniaoRef: "CE-PPSP", dataRecebimento: "2025-05-20" },
-    { tipo: "Entrada", numero: "028/2025", assunto: "Regimento Interno PPSP", origemNome: "Sínodo São Paulo", reuniaoRef: "CE-PPSP", dataRecebimento: "2025-05-20" },
-    { tipo: "Entrada", numero: "029/2025", assunto: "Estatuto do PPSP", origemNome: "Sínodo São Paulo", reuniaoRef: "CE-PPSP", dataRecebimento: "2025-05-20" },
-    { tipo: "Entrada", numero: "030/2025", assunto: "Ao PPSP - Informação quanto a alteração da Razão Social", origemNome: "IP Aliança em Vinhedo", reuniaoRef: "SE-PPSP", dataRecebimento: "2025-06-04" },
-    { tipo: "Entrada", numero: "031/2025", assunto: "Solicitação de Transferência de Recursos para compor o Caixa da Federação", origemNome: "FE-SAF-PPSP", reuniaoRef: "CE-PPSP", dataRecebimento: "2025-06-16" },
-    { tipo: "Entrada", numero: "032/2025", assunto: "Organização da Federação da SAF’s do PPSP", origemNome: "FE-SAF-PPSP", reuniaoRef: "CE-PPSP", dataRecebimento: "2025-07-08" },
-    { tipo: "Entrada", numero: "033/2025", assunto: "Cessão e Apoio Rev. Luis Henrique Portela", origemNome: "APMT", reuniaoRef: "II RE-PPSP", dataRecebimento: "2025-07-22" },
-    { tipo: "Entrada", numero: "034/2025", assunto: "Solicitação de Candidatura - Sem. Flávio Batista", origemNome: "IP Aliança em SP", reuniaoRef: "II RE-PPSP", dataRecebimento: "2025-07-30" },
-    { tipo: "Entrada", numero: "035/2025", assunto: "DISSOLUÇÃO DA RELAÇÃO DE PASTOR EFETIVO", origemNome: "IPAL", reuniaoRef: "II RE-PPSP", dataRecebimento: "2025-07-31" },
-    { tipo: "Entrada", numero: "036/2025", assunto: "PEDIDO DE DESIGNAÇÃO", origemNome: "IPAL", reuniaoRef: "II RE-PPSP", dataRecebimento: "2025-07-31" },
-    { tipo: "Entrada", numero: "037/2025", assunto: "Pedido de Designação – art. 37", origemNome: "Rev. Lucas Rezende", reuniaoRef: "II RE-PPSP", dataRecebimento: "2025-08-11" },
-    { tipo: "Entrada", numero: "038/2025", assunto: "Parecer quanto alteração estatutária", origemNome: "IP Aliança em VND", reuniaoRef: "II RE-PPSP", dataRecebimento: "2025-08-20" },
-    { tipo: "Entrada", numero: "039/2025", assunto: "Pedido de Ordenação de Licenciado", origemNome: "IPCEA", reuniaoRef: "II RE-PPSP", dataRecebimento: "2025-08-11" },
-    { tipo: "Entrada", numero: "040/2025", assunto: "Justificativa de Ausência II RE-PPSP 0209", origemNome: "Rev. Bernardo Cho", reuniaoRef: "III RE-PPSP", dataRecebimento: "2025-08-27" },
-    { tipo: "Entrada", numero: "041/2025", assunto: "Designação de Auxiliares – IPMA", origemNome: "IPMA", reuniaoRef: "II RE-PPSP", dataRecebimento: "2025-09-02" },
-    { tipo: "Entrada", numero: "042/2025", assunto: "Designação de Pastor Missionária", origemNome: "IPMA", reuniaoRef: "II RE-PPSP", dataRecebimento: "2025-09-02" },
-    { tipo: "Entrada", numero: "043/2025", assunto: "Justificativa de Ausência III RE-PPSP", origemNome: "Rev. T. Naruse", reuniaoRef: "RO-dez", dataRecebimento: "2025-10-07" },
-    { tipo: "Entrada", numero: "044/2025", assunto: "Justificativa de Ausência III RE-PPSP", origemNome: "Rev. T. Jeremias", reuniaoRef: "RO-dez", dataRecebimento: "2025-10-08" },
-    { tipo: "Entrada", numero: "045/2025", assunto: "Designação de Ministro - Rev. Ismael de Jesus Silva (2026)", origemNome: "IP Aliança SP", reuniaoRef: "III RE-PPSP", dataRecebimento: "2025-10-10" },
-    { tipo: "Entrada", numero: "046/2025", assunto: "Designação de Ministro - Rev. Ronaldo Barboza de Vasconcelos (2026)", origemNome: "IP Aliança SP", reuniaoRef: "III RE-PPSP", dataRecebimento: "2025-10-10" },
-    { tipo: "Entrada", numero: "047/2025", assunto: "Proposta de Horário Regimental III RE-PPSP", origemNome: "CE-PPSP", reuniaoRef: "III RE-PPSP", dataRecebimento: "2025-10-08" },
-    { tipo: "Entrada", numero: "048/2025", assunto: "Justificativa de Ausência II RE-PPSP", origemNome: "Presb. Simon Kang", reuniaoRef: "III RE-PPSP", dataRecebimento: "2025-10-10" },
-    { tipo: "Entrada", numero: "049/2025", assunto: "Pedido de Transferência Rev. Thiago J", origemNome: "PBRU", reuniaoRef: "CE-PPSP", dataRecebimento: "2025-11-17" },
-    { tipo: "Entrada", numero: "050/2025", assunto: "Pedido de Verba Emergencial", origemNome: "IPAL", reuniaoRef: "II RO-PPSP", dataRecebimento: "2025-11-25" },
-    { tipo: "Entrada", numero: "051/2025", assunto: "Pedido de Homologação de Eleição Pastoral", origemNome: "IPAL", reuniaoRef: "II RO PPSP", dataRecebimento: "2025-12-04" },
-    { tipo: "Entrada", numero: "052/2025", assunto: "Justificativa de Ausência", origemNome: "Rev. Luiz H P Faria", reuniaoRef: "II RO-PPSP", dataRecebimento: "2025-12-04" },
-    { tipo: "Entrada", numero: "053/2025", assunto: "Pedido de Designação", origemNome: "IPCEA", reuniaoRef: "II RO-PPSP", dataRecebimento: "2025-12-04" },
-    { tipo: "Entrada", numero: "054/2025", assunto: "Justificativa de Ausência", origemNome: "Rev. Bernardo Cho", reuniaoRef: "II RO-PPSP", dataRecebimento: "2025-12-04" },
-    { tipo: "Entrada", numero: "055/2025", assunto: "Alterações no Estatuto solicitadas pelo cartório", origemNome: "CE-PPSP", reuniaoRef: "II RO-PPSP", dataRecebimento: "2025-12-04" },
-    { tipo: "Entrada", numero: "056/2025", assunto: "Justificativa de Ausência", origemNome: "Rev. Ismael", reuniaoRef: "II RO-PPSP", dataRecebimento: "2025-12-04" },
-    { tipo: "Entrada", numero: "001/2026", assunto: "Relatório Ministerial", origemNome: "Rev. Leandro Ap. Souza", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-13" },
-    { tipo: "Entrada", numero: "002/2026", assunto: "Justificativa de Ausência", origemNome: "Rev. Luiz H. P. Faria", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-13" },
-    { tipo: "Entrada", numero: "003/2026", assunto: "Carta Informativa", origemNome: "Rev. Luiz H. P. Faria", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-20" },
-    { tipo: "Entrada", numero: "004/2026", assunto: "Justificativa de Ausência", origemNome: "Rev. Luiz H. P. Faria", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-20" },
-    { tipo: "Entrada", numero: "005/2026", assunto: "Relatório 2025", origemNome: "Rev. Luiz H. P. Faria", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-20" },
-    { tipo: "Entrada", numero: "006/2026", assunto: "Relatório Congregação", origemNome: "IPCEA", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-20" },
-    { tipo: "Entrada", numero: "007/2026", assunto: "Relatório Conselho", origemNome: "IP do Caminho", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-20" },
-    { tipo: "Entrada", numero: "008/2026", assunto: "Relatório de Ministro", origemNome: "Rev. Samuel Ribeiro", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-20" },
-    { tipo: "Entrada", numero: "009/2026", assunto: "Relatório de Ministro", origemNome: "Rev. Sang Y Park", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-20" },
-    { tipo: "Entrada", numero: "010/2026", assunto: "Relatório de Ministro", origemNome: "Rev. Luiz H. P. Faria", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-20" },
-    { tipo: "Entrada", numero: "011/2026", assunto: "Relatório de Informações Cadastrais e Est.", origemNome: "IPCEA", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-20" },
-    { tipo: "Entrada", numero: "012/2026", assunto: "Relatório de Informações Cadastrais e Est.", origemNome: "IPC", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-20" },
-    { tipo: "Entrada", numero: "013/2026", assunto: "Credencial", origemNome: "IPC", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-20" },
-    { tipo: "Entrada", numero: "014/2026", assunto: "Livro de Atas", origemNome: "IPC", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-20" },
-    { tipo: "Entrada", numero: "015/2026", assunto: "Livro de Atas", origemNome: "IPCEA", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-20" },
-    { tipo: "Entrada", numero: "016/2026", assunto: "Relatório de Ministro", origemNome: "Rev. Paulo F.", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-22" },
-    { tipo: "Entrada", numero: "017/2026", assunto: "Transferência Alexandre Kim", origemNome: "IPMA", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-27" },
-    { tipo: "Entrada", numero: "018/2026", assunto: "Antecipação de Verba", origemNome: "IPMA", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-27" },
-    { tipo: "Entrada", numero: "019/2026", assunto: "Livro de Atas IP Aliança Vinhedo", origemNome: "IPAV", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-27" },
-    { tipo: "Entrada", numero: "020/2026", assunto: "Relatório do Secretário Presbiteral - SAF", origemNome: "Rev. Josimar", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-28" },
-    { tipo: "Entrada", numero: "021/2026", assunto: "Credencial 2026", origemNome: "IP Aliança SP", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-28" },
-    { tipo: "Entrada", numero: "022/2026", assunto: "Livro de Atas Unificado 2025", origemNome: "IP Aliança SP", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-28" },
-    { tipo: "Entrada", numero: "023/2026", assunto: "Relatório Conselho PPSP 2025", origemNome: "IP Aliança SP", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-28" },
-    { tipo: "Entrada", numero: "024/2026", assunto: "Relatório Estatística 2025", origemNome: "IP Aliança SP", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-28" },
-    { tipo: "Entrada", numero: "025/2026", assunto: "Relatório de Informações Cadastrais e Est.", origemNome: "IP Aliança Vinhedo", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-28" },
-    { tipo: "Entrada", numero: "026/2026", assunto: "Relatório do Conselho IPAV", origemNome: "IP Aliança Vinhedo", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-28" },
-    { tipo: "Entrada", numero: "027/2026", assunto: "Livro de Atas IPAL", origemNome: "IP Alto da Lapa", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-28" },
-    { tipo: "Entrada", numero: "028/2026", assunto: "Relatório de Inf. Cadastrais e Est.", origemNome: "IP Alto da Lapa", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-28" },
-    { tipo: "Entrada", numero: "029/2026", assunto: "Relatório do Conselho", origemNome: "IP Alto da Lapa", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-28" },
-    { tipo: "Entrada", numero: "030/2026", assunto: "Credencial", origemNome: "IP Alto da Lapa", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-28" },
-    { tipo: "Entrada", numero: "031/2026", assunto: "Relatório de Ministro", origemNome: "Rev. Thiago Naruse", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-28" },
-    { tipo: "Entrada", numero: "032/2026", assunto: "Credencial", origemNome: "IP Aliança Vinhedo", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-28" },
-    { tipo: "Entrada", numero: "033/2026", assunto: "Relatório de Ministro", origemNome: "Rev. Bernardo Cho", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-28" },
-    { tipo: "Entrada", numero: "034/2026", assunto: "Relatório SE-PPSP", origemNome: "SE-PPSP", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-28" },
-    { tipo: "Entrada", numero: "035/2026", assunto: "Relatório Comissão de Posse", origemNome: "Rev. Samuel Ribeiro", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-28" },
-    { tipo: "Entrada", numero: "036/2026", assunto: "Relatório de Ministro", origemNome: "Rev. Chun K. Chung", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-28" },
-    { tipo: "Entrada", numero: "037/2026", assunto: "Relatório de Tutor – Sem. Gabriel", origemNome: "Rev. Thiago Naruse", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-29" },
-    { tipo: "Entrada", numero: "038/2026", assunto: "Relatório de Tutor – Sem. Flávio", origemNome: "Rev. Samuel Ribeiro", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-29" },
-    { tipo: "Entrada", numero: "039/2026", assunto: "Relatório do Conselho", origemNome: "IP Central de Embu", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-29" },
-    { tipo: "Entrada", numero: "040/2026", assunto: "Credencial", origemNome: "IP Central de Embu", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-29" },
-    { tipo: "Entrada", numero: "041/2026", assunto: "Relatório de Ministro", origemNome: "Rev. Josimar", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-29" },
-    { tipo: "Entrada", numero: "042/2026", assunto: "Relatório da Comissão de Ordenação", origemNome: "Rev. Paulo Falkaniere", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-29" },
-    { tipo: "Entrada", numero: "043/2026", assunto: "Relatório do Secretário Presbiterial", origemNome: "Rev. Thiago Naruse", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-29" },
-    { tipo: "Entrada", numero: "044/2026", assunto: "Livro de Atas da CE-PPSP", origemNome: "SE-PPSP", reuniaoRef: "III RO-PPSP", dataRecebimento: "2026-01-29" },
-    { tipo: "Saída", numero: "001/2025", assunto: "Edital de convocação da I RE-PPSP", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-04-01" },
-    { tipo: "Saída", numero: "002/2025", assunto: "Convite ao conselho da IPSSP", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-04-01" },
-    { tipo: "Saída", numero: "003/2025", assunto: "Convite ao conselho da IPAL", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-04-01" },
-    { tipo: "Saída", numero: "004/2025", assunto: "Convite ao conselho da IPCEA", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-04-01" },
-    { tipo: "Saída", numero: "005/2025", assunto: "Convite ao conselho da IPC", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-04-01" },
-    { tipo: "Saída", numero: "006/2025", assunto: "Convite ao conselho da IPMA", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-04-01" },
-    { tipo: "Saída", numero: "007/2025", assunto: "Convite ao conselho da IPAV", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-04-01" },
-    { tipo: "Saída", numero: "008/2025", assunto: "Instruções para comunicação eletrônica e organização da reunião extraordinária do PPSP", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-04-11" },
-    { tipo: "Saída", numero: "009/2025", assunto: "Solicitação de Justificativa de Ausência IRO-PPSP - Rev. Bernado Cho", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-04-16" },
-    { tipo: "Saída", numero: "010/2025", assunto: "Solicitação de Justificativa de Ausência IRO-PPSP - Rev. Chun K Chung", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-04-16" },
-    { tipo: "Saída", numero: "011/2025", assunto: "Solicitação de Justificativa de Ausência IRO-PPSP - Rev. Josimar Miranda", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-04-16" },
-    { tipo: "Saída", numero: "012/2025", assunto: "Solicitação de Justificativa de Ausência IRO-PPSP – Presb. Simon Shin II Kang", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-04-16" },
-    { tipo: "Saída", numero: "013/2025", assunto: "Declaração de Designação de Campo – Rev. David Brito Cerqueira", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-05-08" },
-    { tipo: "Saída", numero: "014/2025", assunto: "Declaração de Designação de Campo – Rev. Thiago Atsushi Naruse", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-05-08" },
-    { tipo: "Saída", numero: "015/2025", assunto: "Declaração de Designação de Campo – Rev. Samuel Bezerra Ribeiro", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-05-27" },
-    { tipo: "Saída", numero: "016/2025", assunto: "Declaração de Designação de Campo – Rev. Ismael de Jesus", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-05-27" },
-    { tipo: "Saída", numero: "017/2025", assunto: "Declaração de Designação de Campo – Rev. Marcos Novaes", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-06-05" },
-    { tipo: "Saída", numero: "018/2025", assunto: "Declaração de Anuência – IPASP – Congregação Presbiteriana Fonte", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-06-30" },
-    { tipo: "Saída", numero: "019/2025", assunto: "Declaração de Anuência – IPCEA – Congregação Presbiteriana em Cardoso", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-06-30" },
-    { tipo: "Saída", numero: "020/2025", assunto: "Declaração de Designação de Campo – Rev. Chun K. Chung", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-07-10" },
-    { tipo: "Saída", numero: "021/2025", assunto: "Resposta Consulta FE-SAF-PPSP quanto a composição de caixa", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-07-10" },
-    { tipo: "Saída", numero: "022/2025", assunto: "Resposta a FE-SAF-PPSP quanto a organização da Federação", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-07-10" },
-    { tipo: "Saída", numero: "023/2025", assunto: "Declaração Designação de Campo - Rev. Chun K Chung", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-07-10" },
-    { tipo: "Saída", numero: "024/2025", assunto: "Solicitação de Compra de Carteira de Ministro", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-07-10" },
-    { tipo: "Saída", numero: "025/2025", assunto: "Solicitação de Atualização Cadastral dos Ministros e Igrejas do PPSP", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-07-15" },
-    { tipo: "Saída", numero: "026/2025", assunto: "Letter of Secondment for The Reverend Luiz H. P. Faria", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-09-03" },
-    { tipo: "Saída", numero: "027/2025", assunto: "Encaminhamento ao CEEM-PPSP", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-09-30" },
-    { tipo: "Saída", numero: "028/2025", assunto: "Encaminhamento de parecer da CEEM para a IPCEA", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-09-30" },
-    { tipo: "Saída", numero: "029/2025", assunto: "Declaração Designação de Campo - Rev. Chun K Chung – 2026", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-10-07" },
-    { tipo: "Saída", numero: "030/2025", assunto: "Declaração Designação de Campo - Rev. Leandro Ap. Souza – 2026", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-11-13" },
-    { tipo: "Saída", numero: "031/2025", assunto: "Solicitação de Declaração de Breve Teor – IPASP", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-11-13" },
-    { tipo: "Saída", numero: "032/2025", assunto: "Solicitação de Declaração de Breve Teor – IPAV", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-11-13" },
-    { tipo: "Saída", numero: "033/2025", assunto: "Solicitação de Declaração de Breve Teor – IPCEA", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-11-13" },
-    { tipo: "Saída", numero: "034/2025", assunto: "Solicitação de Declaração de Breve Teor – IPC", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-11-13" },
-    { tipo: "Saída", numero: "035/2025", assunto: "Solicitação de Declaração de Breve Teor – IPAL", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-11-13" },
-    { tipo: "Saída", numero: "036/2025", assunto: "Solicitação de Declaração de Breve Teor – IPMA", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-11-13" },
-    { tipo: "Saída", numero: "037/2025", assunto: "Transferência Rev. Thiago Jeremias", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-11-17" },
-    { tipo: "Saída", numero: "038/2025", assunto: "Pedido de Transferência Rev. Ronaldo Vasconcelos", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-11-22" },
-    { tipo: "Saída", numero: "039/2025", assunto: "Alterações no Estatuto do PPSP", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-12-04" },
-    { tipo: "Saída", numero: "040/2025", assunto: "Comunicações Decisões II RO – PPSP – IP Alto da Lapa", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-12-11" },
-    { tipo: "Saída", numero: "041/2025", assunto: "Comunicações Decisões IIRO-PPSP – IPCEA", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-12-11" },
-    { tipo: "Saída", numero: "042/2025", assunto: "Comunicações Decisões IIRO-PPSP - IP Metropolitana de Alphaville", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-12-11" },
-    { tipo: "Saída", numero: "043/2025", assunto: "Comunicações Decisões IIRO-PPSP - Rev. Luiz", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-12-11" },
-    { tipo: "Saída", numero: "044/2025", assunto: "Alterações Cadastrais Icalvinus", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-12-11" },
-    { tipo: "Saída", numero: "045/2025", assunto: "Comunicação Efetivação de Transferência", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-12-13" },
-    { tipo: "Saída", numero: "046/2025", assunto: "Designação de Ministro", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-12-13" },
-    { tipo: "Saída", numero: "047/2025", assunto: "Declaração de Designação para bolsa - Rev. Josimar", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-12-23" },
-    { tipo: "Saída", numero: "048/2025", assunto: "Solicitação de Dispensa em Exame - Rev. Marcos Novaes", origemNome: "", reuniaoRef: "", dataRecebimento: "2025-12-27" },
-    { tipo: "Saída", numero: "001/2026", assunto: "Designação de Ministro 2026 - Rev. Leandro Ap Souza", origemNome: "", reuniaoRef: "", dataRecebimento: "2026-01-16" },
-  ];
-
   TABS.protocolo = (function(){
     let aberto = null;
     let form = { assunto: "", origemNome: "", tipo: "Entrada" };
     let filtro = { origem: "", tipo: "", assunto: "", ano: "" };
+    let filtrosAbertos = false;
+    let ordemCrescente = true;
     const notaDraft = {};
     const respostaDraft = {};
 
@@ -1868,15 +1705,17 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       return Array.from(anos).sort((a, b) => b.localeCompare(a));
     }
 
-    /* Exibição sempre em ordem crescente pelo número do protocolo:
-       primeiro pelo ano, depois pelo número dentro daquele ano. */
+    /* Exibição sempre pelo número do protocolo — primeiro pelo ano,
+       depois pelo número dentro daquele ano — na direção escolhida
+       em ordemCrescente (botão de ordenação). */
     function ordenarPorNumero(lista){
+      const sinal = ordemCrescente ? 1 : -1;
       return [...lista].sort((a, b) => {
         const anoA = parseInt(anoDoDoc(a) || "0", 10), anoB = parseInt(anoDoDoc(b) || "0", 10);
-        if (anoA !== anoB) return anoA - anoB;
+        if (anoA !== anoB) return (anoA - anoB) * sinal;
         const numA = parseInt((a.numero || "").split("/")[0] || "0", 10);
         const numB = parseInt((b.numero || "").split("/")[0] || "0", 10);
-        return numA - numB;
+        return (numA - numB) * sinal;
       });
     }
 
@@ -1935,35 +1774,6 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       setSlice("documentos", [novo, ...docs()]);
       form = { assunto: "", origemNome: "", tipo: "Entrada" };
       renderActiveTab();
-    }
-
-    async function importarProtocoloHistorico(){
-      const cfg = STATE.config || {};
-      let baseDocs = docs();
-      if (cfg.protocoloImportadoEm){
-        const refazer = await confirmModal(`A importação do histórico já foi feita em ${fmtDate(cfg.protocoloImportadoEm.slice(0, 10))}. Deseja apagar os documentos importados daquela vez e importar de novo com os dados atuais (use isso se a numeração ou os dados do histórico mudaram desde então)?`);
-        if (!refazer) return;
-        baseDocs = baseDocs.filter(d => !d.importadoHistorico);
-      }
-      const total = IMPORT_PROTOCOLO_HISTORICO.length;
-      const qtdEntrada = IMPORT_PROTOCOLO_HISTORICO.filter(x => x.tipo === "Entrada").length;
-      const qtdSaida = total - qtdEntrada;
-      const ok = await confirmModal(`Isso vai importar ${total} documentos do histórico (${qtdEntrada} de entrada e ${qtdSaida} de saída) para o protocolo, com os números e datas originais. Deseja continuar?`);
-      if (!ok) return;
-      const novos = IMPORT_PROTOCOLO_HISTORICO.map(item => ({
-        id: uid(), numero: item.numero, etapa: "Recebido",
-        reuniaoId: "", comissaoId: "",
-        respostaTexto: "", respostaData: "",
-        anexos: [],
-        historico: [{ data: item.dataRecebimento, texto: "Documento importado do controle histórico da secretaria executiva" }],
-        dataRecebimento: item.dataRecebimento,
-        assunto: item.assunto, origemNome: item.origemNome || "", tipo: item.tipo,
-        reuniaoRef: item.reuniaoRef || "",
-        importadoHistorico: true,
-      })).sort((a, b) => b.dataRecebimento.localeCompare(a.dataRecebimento));
-      await setSlice("documentos", [...novos, ...baseDocs]);
-      await setSlice("config", { ...STATE.config, protocoloImportadoEm: new Date().toISOString() });
-      await alertModal(`Importação concluída: ${total} documentos adicionados ao protocolo.`);
     }
 
     async function downloadAnexo(anexo){
@@ -2138,7 +1948,8 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
                 </div>
               </div>
               <div class="section-actions">
-                <button class="btn" id="btn-import-historico">${icon("upload", 13)} ${(STATE.config || {}).protocoloImportadoEm ? "Reimportar histórico" : "Importar histórico"}</button>
+                <button class="btn" id="btn-ordenar" title="${ordemCrescente ? "Ordem crescente" : "Ordem decrescente"}">${icon(ordemCrescente ? "sortAsc" : "sortDesc", 13)} ${ordemCrescente ? "Crescente" : "Decrescente"}</button>
+                <button class="btn ${filtrosAbertos || filtroAtivo() ? "btn-primary" : ""}" id="btn-toggle-filtros">${icon("filter", 13)} Filtros</button>
                 <button class="btn" id="btn-print-docs">${icon("printer", 13)} Imprimir relação</button>
               </div>
             </div>
@@ -2157,6 +1968,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
               <button class="btn btn-primary" id="btn-add-doc">${icon("plus", 14)} Protocolar</button>
             </div>
 
+            ${(filtrosAbertos || filtroAtivo()) ? `
             <div style="display:grid; grid-template-columns:1.2fr 0.9fr 0.8fr 1.2fr auto; gap:8px; margin-bottom:14px; padding:10px; background:var(--parchment-card); border:1px solid var(--line); border-radius:6px;">
               <span style="position:relative;">
                 ${icon("search", 12)}
@@ -2174,7 +1986,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
               </select>
               <input placeholder="Filtrar por ementa / título" id="filtro-assunto" value="${esc(filtro.assunto)}">
               <button class="btn btn-sm" id="filtro-limpar" ${filtroAtivo() ? "" : "disabled"}>${icon("x", 12)} Limpar filtro</button>
-            </div>
+            </div>` : ""}
 
             ${filtroAtivo() ? `<p class="empty-note" style="margin:-6px 0 10px;">${list.length} de ${totalDocs} documento(s) — filtro ativo.</p>` : ""}
             ${list.length === 0 ? `<p class="empty-note">${totalDocs === 0 ? "Nenhum documento protocolado ainda." : "Nenhum documento corresponde ao filtro."}</p>` : ""}
@@ -2187,17 +1999,26 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
         container.querySelector("#in-tipo").addEventListener("change", e => form.tipo = e.target.value);
         container.querySelector("#btn-add-doc").addEventListener("click", add);
         container.querySelector("#btn-print-docs").addEventListener("click", printList);
-        const btnImportar = container.querySelector("#btn-import-historico");
-        if (btnImportar) btnImportar.addEventListener("click", importarProtocoloHistorico);
+        container.querySelector("#btn-ordenar").addEventListener("click", () => { ordemCrescente = !ordemCrescente; renderActiveTab(); });
+        container.querySelector("#btn-toggle-filtros").addEventListener("click", () => { filtrosAbertos = !filtrosAbertos; renderActiveTab(); });
         const aplicarFiltroOrigem = e => { filtro.origem = e.target.value; renderActiveTab(); };
         const aplicarFiltroAssunto = e => { filtro.assunto = e.target.value; renderActiveTab(); };
-        container.querySelector("#filtro-origem").addEventListener("change", aplicarFiltroOrigem);
-        container.querySelector("#filtro-origem").addEventListener("keydown", e => { if (e.key === "Enter") e.target.blur(); });
-        container.querySelector("#filtro-tipo").addEventListener("change", e => { filtro.tipo = e.target.value; renderActiveTab(); });
-        container.querySelector("#filtro-ano").addEventListener("change", e => { filtro.ano = e.target.value; renderActiveTab(); });
-        container.querySelector("#filtro-assunto").addEventListener("change", aplicarFiltroAssunto);
-        container.querySelector("#filtro-assunto").addEventListener("keydown", e => { if (e.key === "Enter") e.target.blur(); });
-        container.querySelector("#filtro-limpar").addEventListener("click", () => { filtro = { origem: "", tipo: "", assunto: "", ano: "" }; renderActiveTab(); });
+        const elFiltroOrigem = container.querySelector("#filtro-origem");
+        if (elFiltroOrigem){
+          elFiltroOrigem.addEventListener("change", aplicarFiltroOrigem);
+          elFiltroOrigem.addEventListener("keydown", e => { if (e.key === "Enter") e.target.blur(); });
+        }
+        const elFiltroTipo = container.querySelector("#filtro-tipo");
+        if (elFiltroTipo) elFiltroTipo.addEventListener("change", e => { filtro.tipo = e.target.value; renderActiveTab(); });
+        const elFiltroAno = container.querySelector("#filtro-ano");
+        if (elFiltroAno) elFiltroAno.addEventListener("change", e => { filtro.ano = e.target.value; renderActiveTab(); });
+        const elFiltroAssunto = container.querySelector("#filtro-assunto");
+        if (elFiltroAssunto){
+          elFiltroAssunto.addEventListener("change", aplicarFiltroAssunto);
+          elFiltroAssunto.addEventListener("keydown", e => { if (e.key === "Enter") e.target.blur(); });
+        }
+        const elFiltroLimpar = container.querySelector("#filtro-limpar");
+        if (elFiltroLimpar) elFiltroLimpar.addEventListener("click", () => { filtro = { origem: "", tipo: "", assunto: "", ano: "" }; renderActiveTab(); });
 
         container.querySelectorAll("[data-toggle]").forEach(el => el.addEventListener("click", () => {
           const id = el.getAttribute("data-toggle");
@@ -2959,7 +2780,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
 
     let formPastor = { nome: "", igreja: "", status: "Ativo", designacao: "Pastor Efetivo", campoAtuacao: "", agenciaMissionaria: "", cedidoPara: "" };
     let editingPastorId = null, editDraftPastor = {};
-    let formIgreja = { nome: "", cidade: "", pastor: "" };
+    let formIgreja = { nome: "", cidade: "" };
     let editingIgrejaId = null, editDraftIgreja = {};
     let expandedIgrejaId = null;
     const suplenteDraft = {};
@@ -2979,9 +2800,13 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     function cancelEditPastor(){ editingPastorId = null; renderActiveTab(); }
 
     /* -- igrejas -- */
-    function addIgreja(){ if(!formIgreja.nome.trim()) return; setSlice("igrejas", [...igrejas(), { id: uid(), representante: "", suplentes: [], ...formIgreja }]); formIgreja = { nome:"", cidade:"", pastor:"" }; renderActiveTab(); }
+    // O pastor responsável de uma igreja não é mais um campo próprio dela:
+    // é derivado do cadastro de ministros — os pastores efetivos vinculados
+    // àquela igreja (campo "igreja" do pastor + designação "Pastor Efetivo").
+    function pastoresEfetivosDaIgreja(nomeIgreja){ return pastores().filter(p => p.igreja === nomeIgreja && (p.designacao || "Pastor Efetivo") === "Pastor Efetivo"); }
+    function addIgreja(){ if(!formIgreja.nome.trim()) return; setSlice("igrejas", [...igrejas(), { id: uid(), representante: "", suplentes: [], ...formIgreja }]); formIgreja = { nome:"", cidade:"" }; renderActiveTab(); }
     async function removeIgreja(id){ if(await confirmModal("Excluir esta igreja do cadastro?")) setSlice("igrejas", igrejas().filter(i => i.id !== id)); }
-    function startEditIgreja(i){ editingIgrejaId = i.id; editDraftIgreja = { nome:i.nome, cidade:i.cidade, pastor:i.pastor }; renderActiveTab(); }
+    function startEditIgreja(i){ editingIgrejaId = i.id; editDraftIgreja = { nome:i.nome, cidade:i.cidade }; renderActiveTab(); }
     function saveEditIgreja(){ const id = editingIgrejaId; editingIgrejaId = null; setSlice("igrejas", igrejas().map(i => i.id === id ? { ...i, ...editDraftIgreja } : i)); }
     function cancelEditIgreja(){ editingIgrejaId = null; renderActiveTab(); }
     function setRepresentante(id, nome){ setSlice("igrejas", igrejas().map(i => i.id === id ? { ...i, representante: nome } : i)); }
@@ -3091,24 +2916,23 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
 
     function renderIgrejas(container){
       const list = igrejas(); const past = pastores();
-      const pastoresEfetivos = past.filter(p => (p.designacao || "Pastor Efetivo") === "Pastor Efetivo");
       container.innerHTML = `
-        <div style="display:grid; grid-template-columns:2fr 1fr 1.3fr auto; gap:8px; margin-bottom:14px;">
+        <div style="display:grid; grid-template-columns:2fr 1fr auto; gap:8px; margin-bottom:14px;">
           <input placeholder="Nome da igreja (ex.: IP de...)" id="i-nome" value="${esc(formIgreja.nome)}">
           <input placeholder="Cidade" id="i-cidade" value="${esc(formIgreja.cidade)}">
-          <select id="i-pastor"><option value="">Pastor responsável (efetivo)</option>${pastoresEfetivos.map(p => `<option value="${esc(p.nome)}" ${formIgreja.pastor===p.nome?"selected":""}>${esc(p.nome)}</option>`).join("")}</select>
           <button class="btn btn-primary" id="i-add">${icon("plus", 14)} Cadastrar</button>
         </div>
+        <p class="section-sub" style="margin:-8px 0 14px;">O pastor responsável é definido no cadastro de Pastores (campo "Igreja em que atua" + designação "Pastor Efetivo") — não é preciso informar aqui.</p>
         ${list.length === 0 ? '<p class="empty-note">Nenhuma igreja cadastrada ainda.</p>' : ""}
         <div class="list-col">
           ${list.map((i, idx) => {
+            const efetivos = pastoresEfetivosDaIgreja(i.nome).map(p => p.nome);
             const auxiliares = past.filter(p => p.igreja === i.nome && p.designacao === "Pastor Auxiliar").map(p => p.nome);
             if (editingIgrejaId === i.id) return `
-            <div class="row-card" style="display:grid; grid-template-columns:26px 1.6fr 1fr 1.2fr auto; align-items:center; gap:8px;">
+            <div class="row-card" style="display:grid; grid-template-columns:26px 1.6fr 1fr auto; align-items:center; gap:8px;">
               <span style="color:var(--muted); font-size:12px;">${String(idx+1).padStart(2,"0")}</span>
               <input data-edit-field="nome" value="${esc(editDraftIgreja.nome)}">
               <input data-edit-field="cidade" value="${esc(editDraftIgreja.cidade)}">
-              <select data-edit-field="pastor"><option value="">—</option>${pastoresEfetivos.map(p => `<option value="${esc(p.nome)}" ${editDraftIgreja.pastor===p.nome?"selected":""}>${esc(p.nome)}</option>`).join("")}</select>
               <span style="display:flex; gap:4px;">
                 <button class="btn-icon" id="i-save-${i.id}" title="Salvar">${icon("check", 15)}</button>
                 <button class="btn-icon" id="i-cancel-${i.id}" title="Cancelar">${icon("x", 15)}</button>
@@ -3126,7 +2950,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
                   <span style="color:var(--muted); font-size:12px;">${esc(i.cidade) || "—"}</span>
                 </div>
                 <span style="display:flex; align-items:center; gap:10px; flex-shrink:0;">
-                  <span style="color:var(--muted); font-size:12px;">${esc(i.pastor) || "sem pastor vinculado"}</span>
+                  <span style="color:var(--muted); font-size:12px;">${efetivos.length ? esc(efetivos.join(", ")) : "sem pastor efetivo vinculado"}</span>
                   <button class="btn-icon" data-edit-igreja="${i.id}" title="Editar">${icon("pencil", 14)}</button>
                   <button class="btn-icon" data-remove-igreja="${i.id}" title="Excluir">${icon("trash", 15)}</button>
                 </span>
@@ -3157,7 +2981,6 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       `;
       container.querySelector("#i-nome").addEventListener("input", e => formIgreja.nome = e.target.value);
       container.querySelector("#i-cidade").addEventListener("input", e => formIgreja.cidade = e.target.value);
-      container.querySelector("#i-pastor").addEventListener("change", e => formIgreja.pastor = e.target.value);
       container.querySelector("#i-add").addEventListener("click", addIgreja);
       container.querySelectorAll("[data-remove-igreja]").forEach(el => el.addEventListener("click", e => { e.stopPropagation(); removeIgreja(el.getAttribute("data-remove-igreja")); }));
       container.querySelectorAll("[data-edit-igreja]").forEach(el => el.addEventListener("click", e => { e.stopPropagation(); startEditIgreja(list.find(i => i.id === el.getAttribute("data-edit-igreja"))); }));
@@ -3184,7 +3007,6 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
         const row = container.querySelector(`#i-save-${i.id}`).closest(".row-card");
         row.querySelector('[data-edit-field="nome"]').addEventListener("input", e => editDraftIgreja.nome = e.target.value);
         row.querySelector('[data-edit-field="cidade"]').addEventListener("input", e => editDraftIgreja.cidade = e.target.value);
-        row.querySelector('[data-edit-field="pastor"]').addEventListener("change", e => editDraftIgreja.pastor = e.target.value);
         container.querySelector(`#i-save-${i.id}`).addEventListener("click", saveEditIgreja);
         container.querySelector(`#i-cancel-${i.id}`).addEventListener("click", cancelEditIgreja);
       });
