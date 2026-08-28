@@ -721,6 +721,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     filter: '<path d="M4 5h16l-6.5 7.5v5.5l-3 1.5v-7z"/>',
     shield: '<path d="M12 3l7 3v6c0 5-3.5 8-7 9-3.5-1-7-4-7-9V6z"/><path d="M9 12l2 2 4-4"/>',
     target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="0.6"/>',
+    archive: '<rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 001 1h12a1 1 0 001-1V8"/><path d="M10 12h4"/>',
   };
   function icon(name, size){
     size = size || 15;
@@ -1242,7 +1243,8 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     pastores: [],
     igrejas: [],
     candidatos: [],
-    documentos: [],
+    documentosEntrada: [],
+    documentosSaida: [],
     reunioes: [],
     tarefas: [],
     comissaoExecutiva: [],
@@ -1260,6 +1262,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
   let STORE_READY = false;
 
   async function loadAll(){
+    let legadoDocumentos;
     if (CLOUD_ATIVO){
       const { data: row, error } = await supa
         .from("secex_data")
@@ -1271,7 +1274,9 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       for (const key of Object.keys(DEFAULTS)){
         STATE[key] = saved[key] !== undefined ? saved[key] : DEFAULTS[key];
       }
-      if (!row) await persistState(); // primeiro acesso deste usuário: grava o estado inicial
+      legadoDocumentos = saved.documentos;
+      if (migrarDocumentosAntigos(legadoDocumentos)) await persistState();
+      else if (!row) await persistState(); // primeiro acesso deste usuário: grava o estado inicial
     } else {
       for (const key of Object.keys(DEFAULTS)){
         const v = await dbGet(key);
@@ -1282,8 +1287,38 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
           STATE[key] = v;
         }
       }
+      legadoDocumentos = await dbGet("documentos");
+      if (migrarDocumentosAntigos(legadoDocumentos)){
+        dbSet("documentosEntrada", STATE.documentosEntrada);
+        dbSet("documentosSaida", STATE.documentosSaida);
+      }
     }
     STORE_READY = true;
+  }
+
+  /* Até esta versão, Entrada e Saída viviam juntas em um único array
+     "documentos" (com um campo tipo). Agora são dois cadastros separados
+     — STATE.documentosEntrada e STATE.documentosSaida — porque Saída não
+     precisa de carimbo de PDF nem de vínculo com comissão. Quem já tinha
+     dados no formato antigo (ex.: a importação inicial do histórico) tem
+     eles migrados automaticamente aqui, uma única vez, na primeira carga
+     após esta atualização. Retorna true se alguma migração foi feita. */
+  function migrarDocumentosAntigos(legado){
+    if (!Array.isArray(legado) || legado.length === 0) return false;
+    if ((STATE.documentosEntrada && STATE.documentosEntrada.length) || (STATE.documentosSaida && STATE.documentosSaida.length)) return false;
+    const entrada = [], saida = [];
+    legado.forEach(d => {
+      const { tipo, ...resto } = d;
+      if (tipo === "Saída"){
+        const { comissaoId, ...semComissao } = resto;
+        saida.push({ ...semComissao, tipo: "Saída", etapa: d.etapa === "Recebido" ? "Enviado" : d.etapa, anexos: (d.anexos || []).map(a => ({ ...a, carimbado: false })) });
+      } else {
+        entrada.push({ ...resto, tipo: "Entrada", comissaoId: resto.comissaoId || "" });
+      }
+    });
+    STATE.documentosEntrada = entrada;
+    STATE.documentosSaida = saida;
+    return true;
   }
 
   /* Grava o STATE inteiro em uma única linha do usuário logado (modo nuvem). */
@@ -1431,8 +1466,16 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
   /* ============================================================
      Constantes de domínio (compartilhadas entre abas)
      ============================================================ */
+  /* Documentos de Entrada e Saída são dois cadastros separados
+     (STATE.documentosEntrada / STATE.documentosSaida) com necessidades
+     diferentes: Saída não passa por carimbo de PDF nem é vinculada a
+     comissão, então tem sua própria lista de etapas (sem "Em análise na
+     comissão") e etapa inicial ("Enviado" em vez de "Recebido"). */
   const ETAPAS = ["Recebido", "Encaminhado à reunião", "Em análise na comissão", "Resposta emitida", "Arquivado"];
-  const ETAPA_TONE = { "Recebido": "seal", "Encaminhado à reunião": "gold", "Em análise na comissão": "gold", "Resposta emitida": "green", "Arquivado": "muted" };
+  const ETAPAS_SAIDA = ["Enviado", "Encaminhado à reunião", "Resposta emitida", "Arquivado"];
+  const ETAPAS_HOME = ["Recebido", "Enviado", "Encaminhado à reunião", "Em análise na comissão", "Resposta emitida", "Arquivado"];
+  const ETAPA_TONE = { "Recebido": "seal", "Enviado": "seal", "Encaminhado à reunião": "gold", "Em análise na comissão": "gold", "Resposta emitida": "green", "Arquivado": "muted" };
+  function etapasPorTipo(tipo){ return tipo === "Saída" ? ETAPAS_SAIDA : ETAPAS; }
   const FASES = ["Candidato", "Licenciado", "Ordenado"];
   const FASE_TONE = { "Candidato": "muted", "Licenciado": "gold", "Ordenado": "green" };
   const STATUS_PASTOR = ["Ativo", "Licenciado", "Emérito", "Transferido"];
@@ -1598,7 +1641,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
   /* ---------- INÍCIO (painel/resumo) ---------- */
   TABS.inicio = {
     mount(container){
-      const docs = STATE.documentos || [];
+      const docs = [...(STATE.documentosEntrada || []), ...(STATE.documentosSaida || [])];
       const reunioes = STATE.reunioes || [];
       const tarefas = STATE.tarefas || [];
       const pastores = STATE.pastores || [];
@@ -1606,7 +1649,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       const candidatos = STATE.candidatos || [];
 
       const porEtapa = {};
-      ETAPAS.forEach(e => porEtapa[e] = 0);
+      ETAPAS_HOME.forEach(e => porEtapa[e] = 0);
       docs.forEach(d => { porEtapa[d.etapa] = (porEtapa[d.etapa] || 0) + 1; });
       const emAndamento = docs.filter(d => d.etapa !== "Arquivado" && d.etapa !== "Resposta emitida").length;
 
@@ -1634,7 +1677,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
             <div class="stat-tile ${emAndamento > 0 ? "tone-gold" : "tone-green"}">
               <div class="stat-num">${emAndamento}</div>
               <div class="stat-label">Documentos em trâmite</div>
-              <div class="stat-sub">${porEtapa["Recebido"]} recebido(s) · ${porEtapa["Em análise na comissão"]} em comissão</div>
+              <div class="stat-sub">${porEtapa["Recebido"]} recebido(s) · ${porEtapa["Enviado"]} enviado(s) · ${porEtapa["Em análise na comissão"]} em comissão</div>
             </div>
             <div class="stat-tile ${atrasadas.length > 0 ? "tone-seal" : ""}">
               <div class="stat-num">${pendentes.length}</div>
@@ -1662,7 +1705,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
             </div>
           </div>
           <div style="display:flex; flex-wrap:wrap; gap:8px;">
-            ${ETAPAS.map(e => `<div class="row-card" style="flex:1 1 150px;"><span>${esc(e)}</span>${pillHtml(String(porEtapa[e]), ETAPA_TONE[e])}</div>`).join("")}
+            ${ETAPAS_HOME.map(e => `<div class="row-card" style="flex:1 1 150px; cursor:pointer;" data-etapa-home="${esc(e)}" title="Ver documentos desta etapa"><span>${esc(e)}</span>${pillHtml(String(porEtapa[e]), ETAPA_TONE[e])}</div>`).join("")}
           </div>
           ${docs.length === 0 ? '<p class="empty-note">Nenhum documento protocolado ainda.</p>' : ""}
         </div>
@@ -1687,19 +1730,60 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
           }
         </div>
       `;
+
+      container.querySelectorAll("[data-etapa-home]").forEach(el => el.addEventListener("click", () => {
+        if (TABS.protocolo && TABS.protocolo.abrirDocsEtapaModal) TABS.protocolo.abrirDocsEtapaModal(el.getAttribute("data-etapa-home"));
+      }));
     }
   };
 
   /* @@TAB_INICIO@@ */
 
   TABS.protocolo = (function(){
+    let subTab = "Entrada";
     let aberto = null;
-    let form = { assunto: "", origemNome: "", tipo: "Entrada" };
-    let filtro = { origem: "", tipo: "", assunto: "", ano: "" };
+    let form = { assunto: "", origemNome: "" };
+    let filtro = { origem: "", assunto: "", ano: "" };
     let filtrosAbertos = false;
-    let ordemCrescente = true;
+    let ordemCrescente = false;
+    let selecionados = new Set();
+    let bulkEtapa = "", bulkReuniao = "", bulkComissao = "";
     const notaDraft = {};
     const respostaDraft = {};
+
+    /* Entrada e Saída viraram duas sub-abas dentro do Protocolo — trocar de
+       sub-aba reinicia os estados de tela (documento aberto, filtros,
+       seleção em massa) para não misturar contexto de um tipo com o outro. */
+    function trocarSubTab(novo){
+      if (subTab === novo) return;
+      subTab = novo;
+      aberto = null;
+      form = { assunto: "", origemNome: "" };
+      filtro = { origem: "", assunto: "", ano: "" };
+      filtrosAbertos = false;
+      selecionados = new Set();
+      bulkEtapa = ""; bulkReuniao = ""; bulkComissao = "";
+      renderActiveTab();
+    }
+
+    /* Documentos de Saída usam vocabulário diferente dos de Entrada: o que
+       seria "Recebido"/"Origem" vira "Enviado"/"Destinatário". O valor
+       gravado no campo etapa continua sendo sempre "Recebido" internamente
+       (só a etiqueta exibida muda) para não duplicar a lógica de filtros,
+       arquivamento etc. */
+    function rotulosPorTipo(tipo){
+      const isSaida = tipo === "Saída";
+      return {
+        isSaida,
+        tituloAba: isSaida ? "Documentos de Saída" : "Documentos de Entrada",
+        origemPalavra: isSaida ? "Destinatário" : "Origem",
+        origemPlaceholderForm: isSaida ? "Destinatário — digite ou busque um pastor/igreja" : "Origem / remetente — digite ou busque um pastor/igreja",
+        origemPlaceholderFiltro: isSaida ? "Filtrar por destinatário" : "Filtrar por origem/remetente",
+        dataPalavra: isSaida ? "Enviado em" : "Recebido em",
+        verboProtocolo: isSaida ? "enviado" : "recebido",
+        subSub: isSaida ? "Do envio à resposta: acompanhe cada etapa do trâmite" : "Do recebimento à resposta: acompanhe cada etapa do trâmite",
+      };
+    }
 
     /* O ano de um documento é sempre o ano de recebimento/emissão
        (dataRecebimento), não a data de hoje — é ele que define tanto
@@ -1726,12 +1810,43 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       });
     }
 
-    function docs(){ return STATE.documentos || []; }
+    /* Usada pelos popups de consulta (arquivados / por etapa), que sempre
+       mostram do mais novo para o mais antigo independente do botão de
+       ordenação da lista principal. */
+    function ordenarPorNumeroDesc(lista){
+      return [...lista].sort((a, b) => {
+        const anoA = parseInt(anoDoDoc(a) || "0", 10), anoB = parseInt(anoDoDoc(b) || "0", 10);
+        if (anoA !== anoB) return anoB - anoA;
+        const numA = parseInt((a.numero || "").split("/")[0] || "0", 10);
+        const numB = parseInt((b.numero || "").split("/")[0] || "0", 10);
+        return numB - numA;
+      });
+    }
+
+    /* Entrada e Saída são dois cadastros separados no banco de dados
+       (STATE.documentosEntrada / STATE.documentosSaida) — Saída não tem
+       carimbo de PDF nem vínculo com comissão, então cada um tem seu
+       próprio array em vez de compartilhar uma lista com um campo "tipo"
+       de filtro. Cada documento ainda guarda um campo tipo (só para saber
+       em qual dos dois arrays gravá-lo de volta), mas nunca é usado para
+       misturar os dois cadastros numa mesma lista. */
+    function arrayKey(tipo){ return tipo === "Saída" ? "documentosSaida" : "documentosEntrada"; }
+    function docsDe(tipo){ return STATE[arrayKey(tipo)] || []; }
+    function docs(){ return docsDe(subTab); }
+    function docsTodos(){ return [...docsDe("Entrada"), ...docsDe("Saída")]; }
+
+    function docsArquivados(tipo){ return docsDe(tipo).filter(d => d.etapa === "Arquivado"); }
+    /* Documentos arquivados ficam ocultos da lista padrão — só se acessa por
+       eles pelo botão "Arquivados" (popup de consulta). Exceção: se o
+       documento aberto (expandido) no momento for um arquivado — por ter
+       sido acessado a partir do popup — ele continua aparecendo, senão o
+       clique no popup abriria um card que some da lista na hora. */
     function docsFiltrados(){
       const origemBusca = filtro.origem.trim().toLowerCase();
       const assuntoBusca = filtro.assunto.trim().toLowerCase();
       const filtrados = docs().filter(d => {
-        if (filtro.tipo && d.tipo !== filtro.tipo) return false;
+        if (d.id === aberto) return true;
+        if (d.etapa === "Arquivado") return false;
         if (filtro.ano && anoDoDoc(d) !== filtro.ano) return false;
         if (origemBusca && !origemLabel(d).toLowerCase().includes(origemBusca)) return false;
         if (assuntoBusca && !(d.assunto || "").toLowerCase().includes(assuntoBusca)) return false;
@@ -1739,24 +1854,24 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       });
       return ordenarPorNumero(filtrados);
     }
-    function filtroAtivo(){ return !!(filtro.origem.trim() || filtro.tipo || filtro.ano || filtro.assunto.trim()); }
+    function filtroAtivo(){ return !!(filtro.origem.trim() || filtro.ano || filtro.assunto.trim()); }
 
-    function update(doc){ setSlice("documentos", docs().map(d => d.id === doc.id ? doc : d)); }
-    async function remove(id){ if(!(await confirmModal("Excluir este documento do protocolo?"))) return; setSlice("documentos", docs().filter(d => d.id !== id)); }
+    function update(doc){ const key = arrayKey(doc.tipo); setSlice(key, docsDe(doc.tipo).map(d => d.id === doc.id ? doc : d)); }
+    async function remove(id){ if(!(await confirmModal("Excluir este documento do protocolo?"))) return; setSlice(arrayKey(subTab), docs().filter(d => d.id !== id)); }
 
     function logar(doc, texto, patch){
       update({ ...doc, ...(patch || {}), historico: [...doc.historico, { data: todayISO(), texto }] });
     }
 
-    /* Cada tipo (Entrada/Saída) tem sua própria contagem de número, e
+    /* Cada cadastro (Entrada/Saída) tem sua própria contagem de número, e
        essa contagem recomeça a cada ano (é sequencial só dentro do
        ano — 001/2025, 002/2025... e no ano seguinte volta pro 001).
-       Usamos o maior número já existente naquele tipo+ano (e não
+       Usamos o maior número já existente naquele cadastro+ano (e não
        apenas a quantidade de documentos) para nunca repetir um
        número depois de uma exclusão ou de uma importação com
        números não sequenciais. */
     function proximoNumero(tipo, ano){
-      const doTipoAno = docs().filter(d => d.tipo === tipo && anoDoDoc(d) === ano);
+      const doTipoAno = docsDe(tipo).filter(d => anoDoDoc(d) === ano);
       const maior = doTipoAno.reduce((m, d) => {
         const match = /^(\d+)\//.exec(d.numero || "");
         const n = match ? parseInt(match[1], 10) : 0;
@@ -1768,18 +1883,21 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     function add(){
       if (!form.assunto.trim()) return;
       const dataRecebimento = todayISO();
-      const numero = proximoNumero(form.tipo, anoDoDoc({ dataRecebimento }));
+      const numero = proximoNumero(subTab, anoDoDoc({ dataRecebimento }));
+      const rot = rotulosPorTipo(subTab);
       const novo = {
-        id: uid(), numero, etapa: "Recebido",
-        reuniaoId: "", comissaoId: "",
+        id: uid(), tipo: subTab, numero,
+        etapa: rot.isSaida ? "Enviado" : "Recebido",
+        reuniaoId: "",
+        ...(rot.isSaida ? {} : { comissaoId: "" }),
         respostaTexto: "", respostaData: "",
         anexos: [],
-        historico: [{ data: dataRecebimento, texto: "Documento recebido e protocolado pela secretaria executiva" }],
+        historico: [{ data: dataRecebimento, texto: `Documento ${rot.verboProtocolo} e protocolado pela secretaria executiva` }],
         dataRecebimento,
-        assunto: form.assunto, origemNome: form.origemNome, tipo: form.tipo,
+        assunto: form.assunto, origemNome: form.origemNome,
       };
-      setSlice("documentos", [novo, ...docs()]);
-      form = { assunto: "", origemNome: "", tipo: "Entrada" };
+      setSlice(arrayKey(subTab), [novo, ...docs()]);
+      form = { assunto: "", origemNome: "" };
       renderActiveTab();
     }
 
@@ -1800,27 +1918,37 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       }
     }
 
+    /* Documentos de Saída não passam por carimbo (o carimbo do protocolo só
+       faz sentido para algo que chegou e precisa de comprovação de
+       recebimento), então também não ficam restritos a PDF — qualquer
+       arquivo pode ser anexado. Só documentos de Entrada exigem PDF e
+       recebem o carimbo automático. */
     async function anexarArquivos(doc, fileList){
+      const isSaida = doc.tipo === "Saída";
       const arquivos = Array.from(fileList);
       const invalidos = [];
       const validos = [];
       for (const f of arquivos){
-        const ehPdf = f.type === "application/pdf" || /\.pdf$/i.test(f.name);
-        if (!ehPdf){ invalidos.push(f.name); continue; }
+        if (!isSaida){
+          const ehPdf = f.type === "application/pdf" || /\.pdf$/i.test(f.name);
+          if (!ehPdf){ invalidos.push(f.name); continue; }
+        }
         let arquivoFinal = f, carimbado = false;
-        try{
-          const buf = await f.arrayBuffer();
-          const cfgAtual = STATE.config || {};
-          const numeroAtual = doc.numero;
-          const stamped = await carimbarPDF(buf, {
-            numero: numeroAtual,
-            dataStr: fmtDate(todayISO()),
-            secretarioNome: cfgAtual.secretarioNome,
-            secretarioCargo: cfgAtual.secretarioCargo,
-          });
-          if (stamped){ arquivoFinal = stamped; carimbado = true; }
-        }catch(e){ console.warn("Não foi possível carimbar o anexo, mantendo o arquivo original", e); }
-        validos.push({ id: uid(), nome: f.name, tipo: "application/pdf", tamanho: arquivoFinal.size, arquivo: arquivoFinal, carimbado });
+        if (!isSaida){
+          try{
+            const buf = await f.arrayBuffer();
+            const cfgAtual = STATE.config || {};
+            const numeroAtual = doc.numero;
+            const stamped = await carimbarPDF(buf, {
+              numero: numeroAtual,
+              dataStr: fmtDate(todayISO()),
+              secretarioNome: cfgAtual.secretarioNome,
+              secretarioCargo: cfgAtual.secretarioCargo,
+            });
+            if (stamped){ arquivoFinal = stamped; carimbado = true; }
+          }catch(e){ console.warn("Não foi possível carimbar o anexo, mantendo o arquivo original", e); }
+        }
+        validos.push({ id: uid(), nome: f.name, tipo: f.type || "application/octet-stream", tamanho: arquivoFinal.size, arquivo: arquivoFinal, carimbado });
       }
       if (invalidos.length){
         await alertModal(`Só é possível anexar arquivos em PDF, para que o carimbo do protocolo seja aplicado automaticamente. Não anexado(s): ${invalidos.join(", ")}`);
@@ -1836,24 +1964,77 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     }
 
     function printList(){
-      const base = filtroAtivo() ? docsFiltrados() : ordenarPorNumero(docs());
+      const base = docsFiltrados();
+      const rot = rotulosPorTipo(subTab);
       const rows = base.map(d => `
         <tr>
           <td>${esc(d.numero)}</td><td>${esc(d.assunto)}</td><td>${esc(origemLabel(d))}</td>
-          <td>${esc(d.tipo)}</td><td>${esc(d.etapa)}</td><td>${fmtDate(d.dataRecebimento)}</td>
+          <td>${esc(d.etapa)}</td><td>${fmtDate(d.dataRecebimento)}</td>
         </tr>`).join("");
-      printDoc(filtroAtivo() ? "Relação de documentos protocolados (filtrada)" : "Relação de documentos protocolados", `
-        <table class="print-table"><thead><tr><th>Nº</th><th>Assunto</th><th>Origem</th><th>Tipo</th><th>Etapa</th><th>Recebido em</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="6">Nenhum documento protocolado.</td></tr>`}</tbody></table>
+      printDoc(`Relação de ${rot.tituloAba.toLowerCase()}${filtroAtivo() ? " (filtrada)" : ""}`, `
+        <table class="print-table"><thead><tr><th>Nº</th><th>Assunto</th><th>${esc(rot.origemPalavra)}</th><th>Etapa</th><th>${esc(rot.dataPalavra)}</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="5">Nenhum documento protocolado.</td></tr>`}</tbody></table>
       `);
+    }
+
+    /* tipoFiltro é opcional: quando vem do botão "Arquivados" dentro de uma
+       sub-aba, restringe ao tipo daquela sub-aba; quando vem do painel
+       inicial ("Documentos por etapa"), mostra Entrada e Saída juntos. */
+    function abrirDocsEtapaModal(etapa, tipoFiltro){
+      const root = document.getElementById("modal-root");
+      if (!root) return;
+      let base = (tipoFiltro ? docsDe(tipoFiltro) : docsTodos()).filter(d => d.etapa === etapa);
+      const lista = ordenarPorNumeroDesc(base);
+      const tituloTexto = tipoFiltro ? `${etapa} — ${rotulosPorTipo(tipoFiltro).tituloAba}` : etapa;
+      const linhas = lista.map(d => `
+        <div class="row-card" data-abrir-doc-modal="${d.id}" style="cursor:pointer;">
+          <div style="display:flex; align-items:center; gap:10px; min-width:0;">
+            <code class="doc-num">${esc(d.numero)}</code>
+            <span style="font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${esc(d.assunto)}</span>
+            <span style="color:var(--muted); font-size:11.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${esc(origemLabel(d))}</span>
+          </div>
+          <span style="display:flex; align-items:center; gap:10px; flex-shrink:0;">
+            <span style="color:var(--muted); font-size:11.5px;">${fmtDate(d.dataRecebimento)}</span>
+            ${icon("chevronRight", 14)}
+          </span>
+        </div>
+      `).join("");
+      root.innerHTML = `
+        <div class="modal-backdrop" id="modal-backdrop">
+          <div class="modal-box" id="modal-box">
+            <div class="modal-head">
+              <b>${esc(tituloTexto)} (${lista.length})</b>
+              <button class="btn-icon" id="modal-close" title="Fechar">${icon("x", 17)}</button>
+            </div>
+            <div style="overflow:auto; padding:14px; display:flex; flex-direction:column; gap:6px;">
+              ${lista.length === 0 ? `<p class="empty-note">Nenhum documento nesta etapa.</p>` : linhas}
+            </div>
+          </div>
+        </div>
+      `;
+      document.getElementById("modal-backdrop").addEventListener("click", fecharModal);
+      document.getElementById("modal-box").addEventListener("click", e => e.stopPropagation());
+      document.getElementById("modal-close").addEventListener("click", fecharModal);
+      root.querySelectorAll("[data-abrir-doc-modal]").forEach(el => el.addEventListener("click", () => {
+        const id = el.getAttribute("data-abrir-doc-modal");
+        const doc = base.find(d => d.id === id);
+        fecharModal();
+        if (doc) subTab = doc.tipo === "Saída" ? "Saída" : "Entrada";
+        aberto = id;
+        activeTab = "protocolo";
+        renderNav();
+        renderActiveTab();
+      }));
     }
 
     function cardHtml(doc, reunioes, comissoesTodas){
       const isOpen = aberto === doc.id;
+      const rot = rotulosPorTipo(doc.tipo);
       return `
         <div class="acc-card" data-doc="${doc.id}">
           <div class="acc-head" data-toggle="${doc.id}">
             <div style="display:flex; align-items:center; gap:10px; min-width:0;">
+              <input type="checkbox" data-select-doc="${doc.id}" ${selecionados.has(doc.id) ? "checked" : ""} title="Selecionar para ação em massa" style="width:auto; margin:0; flex-shrink:0;">
               ${icon(isOpen ? "chevronDown" : "chevronRight", 14)}
               <code class="doc-num">${esc(doc.numero)}</code>
               <span style="font-size:13.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${esc(doc.assunto)}</span>
@@ -1868,25 +2049,26 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
           ${isOpen ? `
           <div class="acc-body">
             <div style="display:flex; gap:16px; margin:12px 0; font-size:12.5px; color:var(--muted); flex-wrap:wrap;">
-              <span>Origem: <b style="color:var(--ink);">${esc(origemLabel(doc))}</b></span>
+              <span>${esc(rot.origemPalavra)}: <b style="color:var(--ink);">${esc(origemLabel(doc))}</b></span>
               <span>Tipo: <b style="color:var(--ink);">${esc(doc.tipo)}</b></span>
-              <span>Recebido em: <b style="color:var(--ink);">${fmtDate(doc.dataRecebimento)}</b></span>
+              <span>${esc(rot.dataPalavra)}: <b style="color:var(--ink);">${fmtDate(doc.dataRecebimento)}</b></span>
               ${doc.reuniaoRef ? `<span>Reunião (histórico): <b style="color:var(--ink);">${esc(doc.reuniaoRef)}</b></span>` : ""}
             </div>
 
             <div style="display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap;">
               <span style="font-size:12.5px; color:var(--muted);">Etapa:</span>
               <select style="width:auto;" data-etapa="${doc.id}">
-                ${ETAPAS.map(et => `<option ${et === doc.etapa ? "selected" : ""}>${esc(et)}</option>`).join("")}
+                ${etapasPorTipo(doc.tipo).map(et => `<option value="${esc(et)}" ${et === doc.etapa ? "selected" : ""}>${esc(et)}</option>`).join("")}
               </select>
               <select style="width:auto;" data-reuniao="${doc.id}">
                 <option value="">Vincular reunião...</option>
                 ${reunioes.map(r => `<option value="${r.id}" ${doc.reuniaoId === r.id ? "selected" : ""}>Reunião ${fmtDate(r.data)}</option>`).join("")}
               </select>
+              ${doc.tipo !== "Saída" ? `
               <select style="width:auto;" data-comissao="${doc.id}">
                 <option value="">Vincular comissão...</option>
                 ${comissoesTodas.map(c => `<option value="${c.id}" ${doc.comissaoId === c.id ? "selected" : ""}>${esc(c.nome)} — ${fmtDate(c.reuniaoData)}</option>`).join("")}
-              </select>
+              </select>` : ""}
             </div>
 
             <div style="margin-bottom:14px;">
@@ -1904,8 +2086,8 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
                 `).join("")}
               </div>
               <label class="btn btn-sm" style="cursor:pointer;">
-                ${icon("upload", 13)} Anexar PDF (recebe o carimbo do protocolo)
-                <input type="file" multiple accept="${ANEXO_ACCEPT}" data-anexar="${doc.id}" style="display:none;">
+                ${doc.tipo === "Saída" ? `${icon("upload", 13)} Anexar arquivo` : `${icon("upload", 13)} Anexar PDF (recebe o carimbo do protocolo)`}
+                <input type="file" multiple ${doc.tipo === "Saída" ? "" : `accept="${ANEXO_ACCEPT}"`} data-anexar="${doc.id}" style="display:none;">
               </label>
             </div>
 
@@ -1935,14 +2117,50 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       `;
     }
 
+    function aplicarEtapaEmMassa(etapa){
+      if (!etapa || selecionados.size === 0) return;
+      selecionados.forEach(id => {
+        const doc = docs().find(d => d.id === id);
+        if (doc && doc.etapa !== etapa) logar(doc, `Etapa alterada para "${etapa}" (ação em massa)`, { etapa });
+      });
+      renderActiveTab();
+    }
+    function aplicarReuniaoEmMassa(reuniaoId){
+      if (!reuniaoId || selecionados.size === 0) return;
+      const r = (STATE.reunioes || []).find(x => x.id === reuniaoId);
+      selecionados.forEach(id => {
+        const doc = docs().find(d => d.id === id);
+        if (doc) logar(doc, `Encaminhado à reunião de ${r ? fmtDate(r.data) : "—"} (ação em massa)`, { reuniaoId });
+      });
+      renderActiveTab();
+    }
+    function aplicarComissaoEmMassa(comissaoId){
+      if (!comissaoId || selecionados.size === 0) return;
+      const c = allComissoes().find(x => x.id === comissaoId);
+      selecionados.forEach(id => {
+        const doc = docs().find(d => d.id === id);
+        if (doc) logar(doc, `Encaminhado à ${c ? c.nome : "comissão"} para análise (ação em massa)`, { comissaoId });
+      });
+      renderActiveTab();
+    }
+
     return {
       mount(container){
         const list = docsFiltrados();
-        const totalDocs = docs().length;
+        const rot = rotulosPorTipo(subTab);
+        const arquivados = docsArquivados(subTab);
+        const totalDocs = docs().filter(d => d.etapa !== "Arquivado").length;
+        const totalEntrada = docsDe("Entrada").filter(d => d.etapa !== "Arquivado").length;
+        const totalSaida = docsDe("Saída").filter(d => d.etapa !== "Arquivado").length;
         const reunioes = STATE.reunioes || [];
         const comissoesTodas = allComissoes();
         const pastores = STATE.pastores || [];
         const igrejas = STATE.igrejas || [];
+        // remove da seleção qualquer documento que não esteja mais na lista
+        // visível (ex.: depois de mudar a etapa dele para "Arquivado")
+        const idsVisiveis = new Set(list.map(d => d.id));
+        Array.from(selecionados).forEach(id => { if (!idsVisiveis.has(id)) selecionados.delete(id); });
+        const todosVisiveisSelecionados = list.length > 0 && list.every(d => selecionados.has(d.id));
 
         container.innerHTML = `
           <div class="section">
@@ -1951,42 +2169,42 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
                 <span class="section-icon">${icon("file", 18)}</span>
                 <div>
                   <h3 class="section-title">Protocolo de documentos</h3>
-                  <p class="section-sub">Do recebimento à resposta: acompanhe cada etapa do trâmite</p>
+                  <p class="section-sub">${esc(rot.subSub)}</p>
                 </div>
               </div>
               <div class="section-actions">
+                <button class="btn" id="btn-arquivados">${icon("archive", 13)} Arquivados (${arquivados.length})</button>
                 <button class="btn" id="btn-ordenar" title="${ordemCrescente ? "Ordem crescente" : "Ordem decrescente"}">${icon(ordemCrescente ? "sortAsc" : "sortDesc", 13)} ${ordemCrescente ? "Crescente" : "Decrescente"}</button>
                 <button class="btn ${filtrosAbertos || filtroAtivo() ? "btn-primary" : ""}" id="btn-toggle-filtros">${icon("filter", 13)} Filtros</button>
                 <button class="btn" id="btn-print-docs">${icon("printer", 13)} Imprimir relação</button>
               </div>
             </div>
 
-            <div style="display:grid; grid-template-columns:1.6fr 1.3fr 1fr auto; gap:8px; margin-bottom:14px;">
+            <div style="display:flex; gap:6px; margin-bottom:16px;">
+              <button class="btn btn-sm ${subTab === "Entrada" ? "btn-primary" : ""}" data-subtab-protocolo="Entrada">${icon("download", 13)} Documentos de Entrada (${totalEntrada})</button>
+              <button class="btn btn-sm ${subTab === "Saída" ? "btn-primary" : ""}" data-subtab-protocolo="Saída">${icon("upload", 13)} Documentos de Saída (${totalSaida})</button>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1.6fr 1.3fr auto; gap:8px; margin-bottom:14px;">
               <input placeholder="Assunto do documento" id="in-assunto" value="${esc(form.assunto)}">
               <span style="position:relative;">
-                <input placeholder="Origem / remetente — digite ou busque um pastor/igreja" id="in-origem" list="origem-datalist" value="${esc(form.origemNome)}" style="padding-left:28px;">
+                <input placeholder="${esc(rot.origemPlaceholderForm)}" id="in-origem" list="origem-datalist" value="${esc(form.origemNome)}" style="padding-left:28px;">
                 <span style="position:absolute; left:8px; top:50%; transform:translateY(-50%); color:var(--muted); pointer-events:none;">${icon("search", 13)}</span>
                 <datalist id="origem-datalist">
                   ${pastores.map(p => `<option value="${esc(p.nome)}">`).join("")}
                   ${igrejas.map(i => `<option value="${esc(i.nome)}">`).join("")}
                 </datalist>
               </span>
-              <select id="in-tipo"><option ${form.tipo==="Entrada"?"selected":""}>Entrada</option><option ${form.tipo==="Saída"?"selected":""}>Saída</option></select>
               <button class="btn btn-primary" id="btn-add-doc">${icon("plus", 14)} Protocolar</button>
             </div>
 
             ${(filtrosAbertos || filtroAtivo()) ? `
-            <div style="display:grid; grid-template-columns:1.2fr 0.9fr 0.8fr 1.2fr auto; gap:8px; margin-bottom:14px; padding:10px; background:var(--parchment-card); border:1px solid var(--line); border-radius:6px;">
+            <div style="display:grid; grid-template-columns:1.2fr 0.8fr 1.2fr auto; gap:8px; margin-bottom:14px; padding:10px; background:var(--parchment-card); border:1px solid var(--line); border-radius:6px;">
               <span style="position:relative;">
                 ${icon("search", 12)}
-                <input placeholder="Filtrar por origem/remetente" id="filtro-origem" style="padding-left:26px;" value="${esc(filtro.origem)}">
+                <input placeholder="${esc(rot.origemPlaceholderFiltro)}" id="filtro-origem" style="padding-left:26px;" value="${esc(filtro.origem)}">
                 <span style="position:absolute; left:8px; top:50%; transform:translateY(-50%); color:var(--muted); pointer-events:none;">${icon("search", 12)}</span>
               </span>
-              <select id="filtro-tipo">
-                <option value="" ${filtro.tipo===""?"selected":""}>Entrada e saída</option>
-                <option value="Entrada" ${filtro.tipo==="Entrada"?"selected":""}>Só entrada</option>
-                <option value="Saída" ${filtro.tipo==="Saída"?"selected":""}>Só saída</option>
-              </select>
               <select id="filtro-ano">
                 <option value="" ${filtro.ano===""?"selected":""}>Todo período</option>
                 ${anosDisponiveis().map(a => `<option value="${a}" ${filtro.ano===a?"selected":""}>${a}</option>`).join("")}
@@ -1996,18 +2214,83 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
             </div>` : ""}
 
             ${filtroAtivo() ? `<p class="empty-note" style="margin:-6px 0 10px;">${list.length} de ${totalDocs} documento(s) — filtro ativo.</p>` : ""}
+
+            ${list.length > 0 ? `
+            <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); margin-bottom:8px; cursor:pointer; width:fit-content;">
+              <input type="checkbox" id="chk-selecionar-todos" style="width:auto; margin:0;" ${todosVisiveisSelecionados ? "checked" : ""}>
+              Selecionar todos visíveis
+            </label>` : ""}
+
+            ${selecionados.size > 0 ? `
+            <div style="display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:10px; margin-bottom:12px; background:var(--parchment-card); border:1px solid var(--line); border-radius:6px;">
+              <b style="font-size:12.5px;">${selecionados.size} selecionado(s)</b>
+              <span style="display:flex; align-items:center; gap:5px;">
+                <select style="width:auto;" id="bulk-etapa">
+                  <option value="">Mudar etapa...</option>
+                  ${etapasPorTipo(subTab).map(et => `<option value="${esc(et)}" ${bulkEtapa===et?"selected":""}>${esc(et)}</option>`).join("")}
+                </select>
+                <button class="btn btn-sm" id="bulk-etapa-aplicar" ${bulkEtapa?"":"disabled"}>Aplicar</button>
+              </span>
+              <span style="display:flex; align-items:center; gap:5px;">
+                <select style="width:auto;" id="bulk-reuniao">
+                  <option value="">Vincular reunião...</option>
+                  ${reunioes.map(r => `<option value="${r.id}" ${bulkReuniao===r.id?"selected":""}>Reunião ${fmtDate(r.data)}</option>`).join("")}
+                </select>
+                <button class="btn btn-sm" id="bulk-reuniao-aplicar" ${bulkReuniao?"":"disabled"}>Aplicar</button>
+              </span>
+              ${rot.isSaida ? "" : `
+              <span style="display:flex; align-items:center; gap:5px;">
+                <select style="width:auto;" id="bulk-comissao">
+                  <option value="">Vincular comissão...</option>
+                  ${comissoesTodas.map(c => `<option value="${c.id}" ${bulkComissao===c.id?"selected":""}>${esc(c.nome)} — ${fmtDate(c.reuniaoData)}</option>`).join("")}
+                </select>
+                <button class="btn btn-sm" id="bulk-comissao-aplicar" ${bulkComissao?"":"disabled"}>Aplicar</button>
+              </span>`}
+              <button class="btn btn-sm" id="bulk-limpar" style="margin-left:auto;">${icon("x", 12)} Limpar seleção</button>
+            </div>` : ""}
+
             ${list.length === 0 ? `<p class="empty-note">${totalDocs === 0 ? "Nenhum documento protocolado ainda." : "Nenhum documento corresponde ao filtro."}</p>` : ""}
             <div class="list-col">${list.map(d => cardHtml(d, reunioes, comissoesTodas)).join("")}</div>
           </div>
         `;
 
+        container.querySelectorAll("[data-subtab-protocolo]").forEach(el => el.addEventListener("click", () => trocarSubTab(el.getAttribute("data-subtab-protocolo"))));
         container.querySelector("#in-assunto").addEventListener("input", e => form.assunto = e.target.value);
         container.querySelector("#in-origem").addEventListener("input", e => form.origemNome = e.target.value);
-        container.querySelector("#in-tipo").addEventListener("change", e => form.tipo = e.target.value);
         container.querySelector("#btn-add-doc").addEventListener("click", add);
         container.querySelector("#btn-print-docs").addEventListener("click", printList);
         container.querySelector("#btn-ordenar").addEventListener("click", () => { ordemCrescente = !ordemCrescente; renderActiveTab(); });
         container.querySelector("#btn-toggle-filtros").addEventListener("click", () => { filtrosAbertos = !filtrosAbertos; renderActiveTab(); });
+        container.querySelector("#btn-arquivados").addEventListener("click", () => abrirDocsEtapaModal("Arquivado", subTab));
+
+        const chkTodos = container.querySelector("#chk-selecionar-todos");
+        if (chkTodos) chkTodos.addEventListener("change", e => {
+          if (e.target.checked) list.forEach(d => selecionados.add(d.id));
+          else list.forEach(d => selecionados.delete(d.id));
+          renderActiveTab();
+        });
+        container.querySelectorAll("[data-select-doc]").forEach(el => {
+          el.addEventListener("click", e => e.stopPropagation());
+          el.addEventListener("change", e => {
+            const id = el.getAttribute("data-select-doc");
+            if (e.target.checked) selecionados.add(id); else selecionados.delete(id);
+            renderActiveTab();
+          });
+        });
+        const bulkEtapaSel = container.querySelector("#bulk-etapa");
+        if (bulkEtapaSel) bulkEtapaSel.addEventListener("change", e => { bulkEtapa = e.target.value; renderActiveTab(); });
+        const bulkEtapaBtn = container.querySelector("#bulk-etapa-aplicar");
+        if (bulkEtapaBtn) bulkEtapaBtn.addEventListener("click", () => aplicarEtapaEmMassa(bulkEtapa));
+        const bulkReuniaoSel = container.querySelector("#bulk-reuniao");
+        if (bulkReuniaoSel) bulkReuniaoSel.addEventListener("change", e => { bulkReuniao = e.target.value; renderActiveTab(); });
+        const bulkReuniaoBtn = container.querySelector("#bulk-reuniao-aplicar");
+        if (bulkReuniaoBtn) bulkReuniaoBtn.addEventListener("click", () => aplicarReuniaoEmMassa(bulkReuniao));
+        const bulkComissaoSel = container.querySelector("#bulk-comissao");
+        if (bulkComissaoSel) bulkComissaoSel.addEventListener("change", e => { bulkComissao = e.target.value; renderActiveTab(); });
+        const bulkComissaoBtn = container.querySelector("#bulk-comissao-aplicar");
+        if (bulkComissaoBtn) bulkComissaoBtn.addEventListener("click", () => aplicarComissaoEmMassa(bulkComissao));
+        const bulkLimpar = container.querySelector("#bulk-limpar");
+        if (bulkLimpar) bulkLimpar.addEventListener("click", () => { selecionados.clear(); bulkEtapa = ""; bulkReuniao = ""; bulkComissao = ""; renderActiveTab(); });
         const aplicarFiltroOrigem = e => { filtro.origem = e.target.value; renderActiveTab(); };
         const aplicarFiltroAssunto = e => { filtro.assunto = e.target.value; renderActiveTab(); };
         const elFiltroOrigem = container.querySelector("#filtro-origem");
@@ -2015,8 +2298,6 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
           elFiltroOrigem.addEventListener("change", aplicarFiltroOrigem);
           elFiltroOrigem.addEventListener("keydown", e => { if (e.key === "Enter") e.target.blur(); });
         }
-        const elFiltroTipo = container.querySelector("#filtro-tipo");
-        if (elFiltroTipo) elFiltroTipo.addEventListener("change", e => { filtro.tipo = e.target.value; renderActiveTab(); });
         const elFiltroAno = container.querySelector("#filtro-ano");
         if (elFiltroAno) elFiltroAno.addEventListener("change", e => { filtro.ano = e.target.value; renderActiveTab(); });
         const elFiltroAssunto = container.querySelector("#filtro-assunto");
@@ -2025,7 +2306,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
           elFiltroAssunto.addEventListener("keydown", e => { if (e.key === "Enter") e.target.blur(); });
         }
         const elFiltroLimpar = container.querySelector("#filtro-limpar");
-        if (elFiltroLimpar) elFiltroLimpar.addEventListener("click", () => { filtro = { origem: "", tipo: "", assunto: "", ano: "" }; renderActiveTab(); });
+        if (elFiltroLimpar) elFiltroLimpar.addEventListener("click", () => { filtro = { origem: "", assunto: "", ano: "" }; renderActiveTab(); });
 
         container.querySelectorAll("[data-toggle]").forEach(el => el.addEventListener("click", () => {
           const id = el.getAttribute("data-toggle");
@@ -2094,7 +2375,8 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
           const anexo = doc && (doc.anexos || []).find(a => a.id === anexoId);
           if (anexo) abrirVisualizadorAnexo(anexo);
         }));
-      }
+      },
+      abrirDocsEtapaModal
     };
   })();
 
@@ -2498,7 +2780,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     }
 
     function documentosHtml(r){
-      const docs = (STATE.documentos || []).filter(d => d.reuniaoId === r.id);
+      const docs = [...(STATE.documentosEntrada || []), ...(STATE.documentosSaida || [])].filter(d => d.reuniaoId === r.id);
       return `
         <div style="margin-top:12px;">
           <p class="empty-note" style="margin:0 0 10px;">Documentos vinculados a esta reunião pela aba Protocolo.</p>
@@ -2530,7 +2812,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       const aberta = ativa === r.id;
       const presentes = r.membros.filter(m => m.presenca === "Presente").length;
       const sub = subTabReuniao[r.id] || "presenca";
-      const numDocs = (STATE.documentos || []).filter(d => d.reuniaoId === r.id).length;
+      const numDocs = [...(STATE.documentosEntrada || []), ...(STATE.documentosSaida || [])].filter(d => d.reuniaoId === r.id).length;
       const numComissoes = (r.comissoes || []).length;
       const numEleicoes = (r.eleicoes || []).length;
       const numNomeacoes = (r.nomeacoes || []).length;
