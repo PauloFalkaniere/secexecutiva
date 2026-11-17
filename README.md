@@ -68,7 +68,7 @@ Isso cria a tabela `secex_data` (uma linha por conta) e a regra de segurança qu
 
 ## Passo 6 — Criar sua conta no sistema
 
-Abra o `index.html` (local ou já publicado) e clique em "Criar uma conta". Informe seu e-mail e uma senha (mínimo 6 caracteres). Por padrão, o Supabase manda um e-mail de confirmação antes de liberar o primeiro login — confirme pelo link recebido e depois entre normalmente.
+Abra o `index.html` (local ou já publicado) e clique em "Criar uma conta". Informe seu e-mail e uma senha (mínimo 8 caracteres — recomendamos também definir esse mínimo no painel do Supabase em **Authentication** → **Policies/Providers** → **Password**). Por padrão, o Supabase manda um e-mail de confirmação antes de liberar o primeiro login — confirme pelo link recebido e depois entre normalmente.
 
 Se quiser desativar essa confirmação por e-mail (útil enquanto está só testando internamente), isso fica em **Authentication** → **Providers** → **Email** → desmarcar **Confirm email**, no painel do Supabase.
 
