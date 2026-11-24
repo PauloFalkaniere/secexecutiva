@@ -1,7 +1,7 @@
 -- Secretaria Executiva — schema do Supabase
 -- Cole este arquivo inteiro no SQL Editor do seu projeto Supabase e clique em "Run".
 --
--- O que isto faz:
+-- O que isto faz (pode rodar de novo sem problema):
 -- Cria UMA tabela (secex_data) com uma linha por usuário logado. Cada
 -- linha guarda todos os dados daquele presbitério/secretário em uma
 -- única coluna "data" (formato JSON). O Row Level Security (RLS) abaixo
@@ -32,3 +32,45 @@ create policy "Usuarios acessam somente os proprios dados"
   to authenticated
   using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
+
+-- ------------------------------------------------------------------
+-- Anexos (PDFs) — bucket privado no Supabase Storage
+-- Cada arquivo fica em "anexos/<id do usuário>/<id do anexo>.<ext>".
+-- As regras abaixo só deixam cada conta ler, gravar e apagar a
+-- própria pasta. Limite de 25 MB por arquivo.
+-- ------------------------------------------------------------------
+insert into storage.buckets (id, name, public, file_size_limit)
+values ('anexos', 'anexos', false, 26214400)
+on conflict (id) do update set public = false, file_size_limit = excluded.file_size_limit;
+
+drop policy if exists "Anexos: dono le" on storage.objects;
+drop policy if exists "Anexos: dono grava" on storage.objects;
+drop policy if exists "Anexos: dono atualiza" on storage.objects;
+drop policy if exists "Anexos: dono apaga" on storage.objects;
+
+create policy "Anexos: dono le" on storage.objects for select to authenticated
+  using (bucket_id = 'anexos' and (storage.foldername(name))[1] = (select auth.uid())::text);
+create policy "Anexos: dono grava" on storage.objects for insert to authenticated
+  with check (bucket_id = 'anexos' and (storage.foldername(name))[1] = (select auth.uid())::text);
+create policy "Anexos: dono atualiza" on storage.objects for update to authenticated
+  using (bucket_id = 'anexos' and (storage.foldername(name))[1] = (select auth.uid())::text)
+  with check (bucket_id = 'anexos' and (storage.foldername(name))[1] = (select auth.uid())::text);
+create policy "Anexos: dono apaga" on storage.objects for delete to authenticated
+  using (bucket_id = 'anexos' and (storage.foldername(name))[1] = (select auth.uid())::text);
+
+-- ------------------------------------------------------------------
+-- Keepalive — evita que o projeto gratuito seja pausado por falta de
+-- uso. Chamada 2x por semana pelo GitHub Actions
+-- (.github/workflows/supabase-keepalive.yml). Só devolve a hora atual;
+-- não lê nenhum dado.
+-- ------------------------------------------------------------------
+create or replace function public.keepalive()
+returns timestamptz
+language sql
+stable
+security invoker
+set search_path = ''
+as $$ select now() $$;
+
+revoke all on function public.keepalive() from public;
+grant execute on function public.keepalive() to anon, authenticated;
