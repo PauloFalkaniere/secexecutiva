@@ -759,11 +759,35 @@
     }, tipo === "success" ? 2200 : 4500);
   }
 
+  /* Indicador fixo no topo: "Salvando…", "Salvo às 14:32" ou erro.
+     Substitui o aviso que aparecia a cada clique; o aviso grande agora
+     só aparece quando algo dá errado. */
+  let saveState = { status: "idle", at: null }, pendingSaves = 0;
+  function renderSaveStatus(){
+    const el = document.getElementById("save-status");
+    if (!el) return;
+    el.className = "save-status" + (saveState.status === "saving" ? " is-saving" : saveState.status === "error" ? " is-error" : "");
+    const hora = saveState.at ? saveState.at.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : "";
+    const texto = saveState.status === "saving" ? "Salvando…"
+      : saveState.status === "error" ? "Não salvo — verifique a conexão"
+      : saveState.status === "saved" ? `Salvo às ${hora}`
+      : (CLOUD_ATIVO ? "Dados na nuvem" : "Dados neste navegador");
+    el.innerHTML = `<span class="save-dot" aria-hidden="true"></span>${esc(texto)}`;
+  }
   async function setSlice(key, value){
     STATE[key] = value;
     renderActiveTab();
+    pendingSaves++;
+    saveState = { status: "saving", at: saveState.at }; renderSaveStatus();
     const ok = CLOUD_ATIVO ? await persistState() : await dbSet(key, value);
-    showToast(ok ? "Alterações salvas." : "Não foi possível salvar as alterações agora. Elas podem se perder ao recarregar a página.", ok ? "success" : "error");
+    pendingSaves--;
+    if (!ok){
+      saveState = { status: "error", at: saveState.at };
+      showToast("Não foi possível salvar as alterações agora. Elas podem se perder ao recarregar a página.", "error");
+    } else if (pendingSaves === 0){
+      saveState = { status: "saved", at: new Date() };
+    }
+    renderSaveStatus();
   }
 
   /* ============================================================
@@ -978,12 +1002,11 @@
               <p class="brand-sub">Protocolo, reuniões, comissões, cadastros e decisões do presbitério</p>
             </div>
           </div>
-          ${CLOUD_ATIVO ? `
-            <div style="display:flex; align-items:center; gap:12px;">
-              ${CURRENT_USER && CURRENT_USER.email ? `<span style="font-size:11.5px; color:#B9BFC9;">${esc(CURRENT_USER.email)}</span>` : ""}
-              <button class="btn-topbar" id="btn-logout">Sair</button>
-            </div>
-          ` : ""}
+          <div class="topbar-actions">
+            <span class="save-status" id="save-status" role="status" aria-live="polite"></span>
+            ${CLOUD_ATIVO && CURRENT_USER && CURRENT_USER.email ? `<span class="topbar-email">${esc(CURRENT_USER.email)}</span>` : ""}
+            ${CLOUD_ATIVO ? `<button class="btn-topbar" id="btn-logout">Sair</button>` : ""}
+          </div>
         </div>
       </div>
       <div class="navbar"><div class="navbar-inner" id="nav-buttons"></div></div>
@@ -992,6 +1015,7 @@
     renderNav();
     renderBrand();
     renderActiveTab();
+    renderSaveStatus();
     const btnLogout = document.getElementById("btn-logout");
     if (btnLogout) btnLogout.addEventListener("click", logout);
   }
@@ -1006,7 +1030,7 @@
   function renderNav(){
     const wrap = document.getElementById("nav-buttons");
     wrap.innerHTML = NAV.map(t => `
-      <button class="nav-btn ${t.id === activeTab ? "active" : ""}" data-nav="${t.id}">
+      <button class="nav-btn ${t.id === activeTab ? "active" : ""}" data-nav="${t.id}" ${t.id === activeTab ? 'aria-current="page"' : ""}>
         ${icon(t.icon, 14)} ${esc(t.label)}
       </button>
     `).join("");
@@ -1020,14 +1044,38 @@
     });
   }
 
+  /* Cada alteração redesenha a aba inteira. Para não "perder o lugar",
+     guardamos qual campo estava em foco (e a posição do cursor) e a
+     rolagem da página, e restauramos tudo depois de redesenhar. */
+  function seletorDoElemento(el){
+    if (!el || el === document.body) return null;
+    if (el.id) return "#" + CSS.escape(el.id);
+    for (const at of el.attributes){
+      if (at.name.startsWith("data-")) return `${el.tagName.toLowerCase()}[${at.name}="${CSS.escape(at.value)}"]`;
+    }
+    return null;
+  }
   function renderActiveTab(){
     const container = document.getElementById("tab-content");
     if (!container) return;
     const tab = TABS[activeTab];
     if (!tab) { container.innerHTML = ""; return; }
+    const ativo = document.activeElement;
+    const sel = container.contains(ativo) ? seletorDoElemento(ativo) : null;
+    let cursor = null;
+    try{ if (sel && typeof ativo.selectionStart === "number") cursor = [ativo.selectionStart, ativo.selectionEnd]; }catch(e){}
+    const scrollY = window.scrollY;
     container.innerHTML = "";
     tab.mount(container);
     renderBrand();
+    window.scrollTo(0, scrollY);
+    if (sel){
+      const novo = container.querySelector(sel);
+      if (novo && typeof novo.focus === "function"){
+        novo.focus({ preventScroll: true });
+        if (cursor){ try{ novo.setSelectionRange(cursor[0], cursor[1]); }catch(e){} }
+      }
+    }
   }
 
   function sectionShell(container, { icon: ic, title, sub, actions }, bodyBuilder){
@@ -3349,17 +3397,18 @@
     }
 
     let subTab = "geral";
+    /* Agrupados por assunto, para a lista lateral ficar mais fácil de ler. */
     const CONFIG_SUBS = [
-      { id: "geral", label: "Configurações gerais", icon: "gear", render: renderGeral },
-      { id: "executiva", label: "Comissão executiva", icon: "user", render: renderExecutiva },
-      { id: "fiscal", label: "Conselho fiscal", icon: "shield", render: renderFiscal },
-      { id: "gestor", label: "Comitê gestor", icon: "target", render: renderGestor },
-      { id: "membros", label: "Membros efetivos", icon: "users", render: renderMembrosEfetivos },
-      { id: "candidatos", label: "Candidatos", icon: "graduation", render: renderCandidatos },
-      { id: "secretarias", label: "Secretarias de causas", icon: "clipboard", render: renderSecretarias },
-      { id: "permanentes", label: "Comissões permanentes", icon: "layers", render: renderPermanentes },
-      { id: "temporarias", label: "Comissões temporárias", icon: "layers", render: renderTemporarias },
-      { id: "especiais", label: "Comissões especiais", icon: "layers", render: renderEspeciais },
+      { grupo: "Presbitério", id: "geral", label: "Configurações gerais", icon: "gear", render: renderGeral },
+      { grupo: "Pessoas", id: "membros", label: "Membros efetivos", icon: "users", render: renderMembrosEfetivos },
+      { grupo: "Pessoas", id: "candidatos", label: "Candidatos", icon: "graduation", render: renderCandidatos },
+      { grupo: "Órgãos", id: "executiva", label: "Comissão executiva", icon: "user", render: renderExecutiva },
+      { grupo: "Órgãos", id: "fiscal", label: "Conselho fiscal", icon: "shield", render: renderFiscal },
+      { grupo: "Órgãos", id: "gestor", label: "Comitê gestor", icon: "target", render: renderGestor },
+      { grupo: "Comissões e secretarias", id: "secretarias", label: "Secretarias de causas", icon: "clipboard", render: renderSecretarias },
+      { grupo: "Comissões e secretarias", id: "permanentes", label: "Comissões permanentes", icon: "layers", render: renderPermanentes },
+      { grupo: "Comissões e secretarias", id: "temporarias", label: "Comissões temporárias", icon: "layers", render: renderTemporarias },
+      { grupo: "Comissões e secretarias", id: "especiais", label: "Comissões especiais", icon: "layers", render: renderEspeciais },
     ];
 
     return {
@@ -3377,7 +3426,7 @@
             </div>
             <div class="presb-layout">
               <div class="presb-sidebar">
-                ${CONFIG_SUBS.map(s => `<button class="presb-sidebar-btn ${subTab===s.id?"active":""}" data-config-sub="${s.id}">${icon(s.icon, 14)} ${esc(s.label)}</button>`).join("")}
+                ${CONFIG_SUBS.map((s, i) => `${i === 0 || CONFIG_SUBS[i-1].grupo !== s.grupo ? `<div class="presb-sidebar-group">${esc(s.grupo)}</div>` : ""}<button class="presb-sidebar-btn ${subTab===s.id?"active":""}" data-config-sub="${s.id}" ${subTab===s.id?'aria-current="page"':""}>${icon(s.icon, 14)} ${esc(s.label)}</button>`).join("")}
               </div>
               <div class="presb-content" id="config-sub-body"></div>
             </div>
@@ -3394,6 +3443,16 @@
   /* ============================================================
      Boot
      ============================================================ */
+  /* Botões que só mostram um ícone (lápis, lixeira, olho…) já têm um
+     "title"; copiamos para aria-label para leitores de tela anunciarem
+     o nome do botão. Vale para tudo que for desenhado depois. */
+  function nomearBotoesDeIcone(raiz){
+    raiz.querySelectorAll("button[title]:not([aria-label]), a[title]:not([aria-label])").forEach(el => el.setAttribute("aria-label", el.getAttribute("title")));
+  }
+  new MutationObserver(muts => {
+    for (const m of muts) m.addedNodes.forEach(n => { if (n.nodeType === 1) nomearBotoesDeIcone(n); });
+  }).observe(document.body, { childList: true, subtree: true });
+
   async function init(){
     if (!CLOUD_ATIVO){
       await loadAll();
