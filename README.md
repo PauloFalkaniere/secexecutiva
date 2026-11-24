@@ -3,9 +3,16 @@
 Este pacote contém o sistema pronto para deixar de ser só uma pré-visualização e passar a ser um site de verdade, com login por conta e dados salvos com segurança na nuvem (não mais só no navegador).
 
 Arquivos:
-- `index.html` — o sistema completo, pronto para hospedar.
-- `schema.sql` — o comando que cria a tabela e a segurança no banco de dados.
+- `index.html` — a página do sistema (só a estrutura; quase nunca precisa ser editada).
+- `app.js` — todo o funcionamento do sistema.
+- `styles.css` — cores, tamanhos e layout.
+- `config.js` — URL e chave pública do seu projeto Supabase.
+- `vendor/` — bibliotecas usadas pelo sistema (Supabase, jsPDF, pdf-lib), guardadas aqui para o site não depender de sites externos.
+- `schema.sql` — cria a tabela, o armazenamento de anexos e as regras de segurança no banco de dados.
+- `.github/workflows/supabase-keepalive.yml` — tarefa automática que impede o Supabase de pausar o projeto.
 - `README.md` — este guia.
+
+**Para publicar uma atualização**, envie todos esses arquivos (não só o `index.html`).
 
 ## O que muda a partir de agora
 
@@ -109,8 +116,8 @@ Não recomendo bancos "só banco" sem autenticação embutida (como Neon ou Turs
 
 ## Limitações do plano gratuito para ficar de olho
 
-- O projeto do Supabase pausa sozinho após 1 semana sem acesso nenhum — se isso acontecer, é só entrar no painel e reativar (nenhum dado é perdido).
-- Os anexos de documentos (PDFs) continuam guardados dentro dos dados de cada conta, como hoje. Isso funciona bem em volume moderado; se um dia os anexos somarem centenas de MB, vale migrar para o Supabase Storage (armazenamento de arquivos separado) — isso pode ser feito depois, sem afetar o que já estiver funcionando.
+- O projeto do Supabase pausa sozinho após 1 semana sem acesso nenhum. Para evitar isso, a tarefa automática `.github/workflows/supabase-keepalive.yml` chama o banco duas vezes por semana. Você pode acompanhar em **Actions → Supabase keepalive** no GitHub. Se mesmo assim o projeto pausar, é só entrar no painel e reativar (nenhum dado é perdido).
+- Os anexos de documentos (PDFs) ficam no **Supabase Storage**, num bucket privado chamado `anexos` (cada conta só acessa a própria pasta). O plano gratuito oferece 1 GB de arquivos; o limite por arquivo no sistema é de 25 MB.
 - O plano gratuito permite até 2 projetos Supabase por conta — mais que suficiente para este sistema.
 
 ## Testando com os colegas

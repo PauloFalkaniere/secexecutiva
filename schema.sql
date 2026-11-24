@@ -57,3 +57,20 @@ create policy "Anexos: dono atualiza" on storage.objects for update to authentic
   with check (bucket_id = 'anexos' and (storage.foldername(name))[1] = (select auth.uid())::text);
 create policy "Anexos: dono apaga" on storage.objects for delete to authenticated
   using (bucket_id = 'anexos' and (storage.foldername(name))[1] = (select auth.uid())::text);
+
+-- ------------------------------------------------------------------
+-- Keepalive — evita que o projeto gratuito seja pausado por falta de
+-- uso. Chamada 2x por semana pelo GitHub Actions
+-- (.github/workflows/supabase-keepalive.yml). Só devolve a hora atual;
+-- não lê nenhum dado.
+-- ------------------------------------------------------------------
+create or replace function public.keepalive()
+returns timestamptz
+language sql
+stable
+security invoker
+set search_path = ''
+as $$ select now() $$;
+
+revoke all on function public.keepalive() from public;
+grant execute on function public.keepalive() to anon, authenticated;
