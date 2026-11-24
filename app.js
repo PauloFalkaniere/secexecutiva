@@ -284,18 +284,19 @@
     return canvas.toDataURL("image/png");
   }
 
-  /* Sentença oficial da etiqueta, dividida em trechos (para negritar
-     "Compareceu", a data, o local e o tipo de membro) — usada tanto na
-     versão impressa (HTML) quanto na versão em PDF para download. */
+  /* Sentença oficial da etiqueta, dividida em trechos normais e em
+     negrito exatamente como no modelo do Word: "Compareceu à **I Reunião
+     Extraordinária** do **Presbitério de São Paulo**, realizada no dia
+     **26 de abril de 2025**, na **Companhia de Estágios**, como **membro
+     efetivo**, conforme **art. 66, alínea “a”** da **CI/IPB**." */
   function montarSegmentosEtiqueta(r, gi){
     const cfg = STATE.config || {};
     const tipoReuniao = r.tipo && r.tipo.trim() ? r.tipo.trim() : "reunião";
     const presbiterio = cfg.nomePresbiterio || "presbitério";
     const segs = [
-      { text: "Compareceu", bold: true },
-      { text: ` à `, bold: false },
+      { text: "Compareceu à ", bold: false },
       { text: tipoReuniao, bold: true },
-      { text: `, do `, bold: false },
+      { text: ` do `, bold: false },
       { text: presbiterio, bold: true },
       { text: `, realizada ${diasDaReuniao(r).length > 1 ? "nos dias" : "no dia"} `, bold: false },
       { text: fmtPeriodoExtenso(r) || fmtDate(r.data), bold: true },
@@ -306,7 +307,11 @@
     }
     segs.push({ text: ", como ", bold: false });
     segs.push({ text: gi.rotulo, bold: true });
-    segs.push({ text: `, conforme art. 66, alínea "${gi.alinea}" da CI/IPB.`, bold: false });
+    segs.push({ text: ", conforme ", bold: false });
+    segs.push({ text: `art. 66, alínea \u201C${gi.alinea}\u201D`, bold: true });
+    segs.push({ text: " da ", bold: false });
+    segs.push({ text: "CI/IPB", bold: true });
+    segs.push({ text: ".", bold: false });
     return segs;
   }
 
@@ -381,18 +386,25 @@
     return (r.registros || []).filter(x => x.nome === nomePessoa && (x.texto || "").trim()).map(x => x.texto.trim());
   }
 
-  /* Todas as linhas de registro de uma pessoa nesta reunião, na ordem em
-     que saem na etiqueta: designação, eleições, nomeações, comissões da
-     reunião e registros livres. */
-  function participacoesLinhas(r, nomePessoa){
-    return [
-      ...participacoesDesignacoes(r, nomePessoa),
-      ...participacoesEleicoes(r, nomePessoa),
-      ...participacoesNomeacoes(r, nomePessoa),
-      ...participacoesComissoes(r, nomePessoa),
-      ...participacoesRegistros(r, nomePessoa),
-    ];
+  /* Registros da etiqueta no formato do modelo: as comissões da reunião
+     vão num bloco "Participou da Comissão:" (só o nome da comissão em
+     cada linha); o resto (designação, eleições, nomeações, registro
+     livre) vem antes, uma decisão por linha. */
+  function registrosEtiqueta(r, nomePessoa){
+    const comissoes = (r.comissoes || [])
+      .filter(c => (c.membros || []).includes(nomePessoa) || c.relator === nomePessoa || c.subrelator === nomePessoa)
+      .map(c => c.nome + (c.relator === nomePessoa ? " - relator" : c.subrelator === nomePessoa ? " - subrelator" : ""));
+    return {
+      outros: [
+        ...participacoesDesignacoes(r, nomePessoa),
+        ...participacoesEleicoes(r, nomePessoa),
+        ...participacoesNomeacoes(r, nomePessoa),
+        ...participacoesRegistros(r, nomePessoa),
+      ],
+      comissoes,
+    };
   }
+
 
   /* Escreve um parágrafo com trechos em negrito e normal, quebrando
      linha manualmente e (opcionalmente) justificando — o jsPDF não
@@ -407,7 +419,8 @@
     for (const ch of String(t)) w += doc.getTextWidth(ch);
     return w;
   }
-  function drawJustifiedMixedText(doc, segments, x, y, maxWidth, fontSize, lineHeight, justify, measureOnly){
+  function drawJustifiedMixedText(doc, segments, x, y, maxWidth, fontSize, lineHeight, justify, measureOnly, familia, estiloNegrito){
+    const fam = familia || "helvetica", negrito = estiloNegrito || "bold";
     doc.setFontSize(fontSize);
     /* Cada "palavra" é uma lista de pedaços (negrito ou não). Um trecho
        que começa sem espaço gruda na palavra anterior — assim a vírgula
@@ -426,9 +439,9 @@
       colar = txt.length > 0 && !txt.endsWith(" ");
     });
     function widthOf(w){
-      return w.reduce((soma, run) => { doc.setFont("helvetica", run.bold ? "bold" : "normal"); return soma + larguraTexto(doc, run.text); }, 0);
+      return w.reduce((soma, run) => { doc.setFont(fam, run.bold ? negrito : "normal"); return soma + larguraTexto(doc, run.text); }, 0);
     }
-    doc.setFont("helvetica", "normal");
+    doc.setFont(fam, "normal");
     const spaceWidth = doc.getTextWidth(" ");
     let line = [], lineWidth = 0, cursorY = y;
     function flushLine(isLast){
@@ -442,7 +455,7 @@
       let cx = x;
       line.forEach((w, i) => {
         w.forEach(run => {
-          doc.setFont("helvetica", run.bold ? "bold" : "normal");
+          doc.setFont(fam, run.bold ? negrito : "normal");
           if (!measureOnly) doc.text(run.text, cx, cursorY);
           cx += larguraTexto(doc, run.text);
         });
@@ -469,17 +482,37 @@
   }
 
   /* ============================================================
-     Etiquetas de presença — estilo "Clássico com moldura"
-     Folha A4 deitada, 12 etiquetas de 63,6 × 53,1 mm (o espaço da
-     carteira de pastores e presbíteros), em 4 colunas × 3 linhas.
-     A linha tracejada cinza em volta de cada etiqueta é a linha de
-     corte; a moldura fica por dentro dela, então sai inteira depois
-     de recortar. Imprimir sempre em "Tamanho real" (100%).
+     Etiquetas de presença — reprodução do modelo do Word
+     ("Etiquetas - Conciliares - Modelo Geral.docx"):
+     - A4 deitada, margens de 12,7 mm, 12 caixas de 63,55 × 53,11 mm
+       (4 por linha), alinhadas à esquerda como no Word;
+     - borda única verde #213315 de 4 pt, cantos retos (é a guia de corte);
+     - margem interna de 2,54 mm nas laterais e 1,27 mm em cima;
+     - logotipo, nome da pessoa (acréscimo), texto justificado de 7,5 pt,
+       registros, "Participou da Comissão:" (8,5 pt, negrito) e, no pé,
+       nome do secretário (7,5 pt) e "Secretário Executivo" (negrito).
+     Medidas tiradas do .docx; posições conferidas contra o PDF do modelo.
      ============================================================ */
   const ETQ = {
-    pageW: 297, pageH: 210, w: 63.6, h: 53.1, cols: 4, rows: 3, gap: 3,
-    verde: [33, 51, 21], dourado: [169, 129, 47], douradoTexto: [125, 95, 29], tinta: [30, 42, 62], corte: [175, 175, 175],
+    w: 63.55, h: 53.11, cols: 4, rows: 3,
+    x0: 13.21, y0: 13.20,           // canto da caixa (meio da linha da borda)
+    passoX: 68.62, passoY: 57.74,    // distância entre caixas, como no Word
+    borda: 1.41, verde: [33, 51, 21],
+    insetX: 2.54, insetY: 1.27,
+    logoW: 34.4, logoH: 9.86,
+    rodapeTopo: 42.27,               // topo da linha do nome do secretário (a partir do topo da caixa)
   };
+  const PT = 0.3528; // mm por ponto
+
+  function encaixarImagem(doc, dataUrl, maxW, maxH){
+    let w = maxW, h = maxH;
+    try{
+      const p = doc.getImageProperties(dataUrl);
+      const escala = Math.min(maxW / p.width, maxH / p.height);
+      w = p.width * escala; h = p.height * escala;
+    }catch(e){}
+    return { w, h };
+  }
 
   /* Quem recebe etiqueta: presente em pelo menos um dia da reunião.
      Ordem da chamada: ministros, igrejas, depois os demais grupos. */
@@ -492,148 +525,142 @@
       .map(x => x.m);
   }
 
-  function losango(doc, cx, cy, raio, cor){
-    doc.setFillColor(...cor);
-    doc.triangle(cx - raio, cy, cx, cy - raio, cx + raio, cy, "F");
-    doc.triangle(cx - raio, cy, cx, cy + raio, cx + raio, cy, "F");
+  /* Fonte própria da etiqueta (ex.: ZapfHumnst BT), enviada pelo usuário
+     em Configurações gerais. Fica no Storage da conta (ou no navegador,
+     no modo local) — nunca no repositório, que é público. */
+  async function blobParaBase64(blob){
+    const buf = new Uint8Array(await blob.arrayBuffer());
+    let s = "";
+    for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+    return btoa(s);
   }
-
-  /* Dimensões (mm) de uma imagem data URL, mantendo a proporção dentro
-     de uma caixa de largura/altura máximas. */
-  function encaixarImagem(doc, dataUrl, maxW, maxH){
-    let w = maxW, h = maxH;
+  async function carregarFonteEtiqueta(doc){
+    const f = (STATE.config || {}).fonteEtiqueta;
+    if (!f || !f.normal) return { familia: "helvetica", temNegrito: true };
     try{
-      const p = doc.getImageProperties(dataUrl);
-      const escala = Math.min(maxW / p.width, maxH / p.height);
-      w = p.width * escala; h = p.height * escala;
-    }catch(e){}
-    return { w, h };
+      const normal64 = await blobParaBase64(await obterArquivoAnexo(f.normal));
+      doc.addFileToVFS("etiqueta-normal.ttf", normal64);
+      doc.addFont("etiqueta-normal.ttf", "Etiqueta", "normal");
+      let temNegrito = false;
+      if (f.negrito){
+        const negrito64 = await blobParaBase64(await obterArquivoAnexo(f.negrito));
+        doc.addFileToVFS("etiqueta-negrito.ttf", negrito64);
+        doc.addFont("etiqueta-negrito.ttf", "Etiqueta", "bold");
+        temNegrito = true;
+      }
+      doc.setFont("Etiqueta", "normal"); doc.getTextWidth("teste"); // falha aqui se o arquivo for inválido
+      return { familia: "Etiqueta", temNegrito };
+    }catch(e){
+      console.warn("Fonte da etiqueta não pôde ser usada; seguindo com Helvetica", e);
+      return { familia: "helvetica", temNegrito: true, falhou: true };
+    }
   }
 
-  function desenharEtiqueta(doc, r, m, x, y){
+  function desenharEtiqueta(doc, r, m, x, y, fonte){
     const cfg = STATE.config || {};
     const W = ETQ.w, H = ETQ.h;
+    const fam = fonte.familia || "helvetica";
+    const estiloNegrito = fonte.temNegrito === false ? "normal" : "bold";
+    const usar = negrito => doc.setFont(fam, negrito ? estiloNegrito : "normal");
 
-    /* linha de corte (tracejada, cinza) */
-    doc.setLineDashPattern([1.2, 1.2], 0);
-    doc.setDrawColor(...ETQ.corte); doc.setLineWidth(0.15);
-    doc.rect(x, y, W, H);
-    doc.setLineDashPattern([], 0);
+    /* caixa branca com borda verde de 4 pt */
+    doc.setDrawColor(...ETQ.verde); doc.setLineWidth(ETQ.borda);
+    doc.setFillColor(255, 255, 255);
+    doc.rect(x, y, W, H, "FD");
 
-    /* moldura dupla: verde-escuro por fora, filete dourado por dentro */
-    doc.setDrawColor(...ETQ.verde); doc.setLineWidth(0.6);
-    doc.roundedRect(x + 1.6, y + 1.6, W - 3.2, H - 3.2, 1.2, 1.2, "S");
-    doc.setDrawColor(...ETQ.dourado); doc.setLineWidth(0.2);
-    doc.roundedRect(x + 2.6, y + 2.6, W - 5.2, H - 5.2, 0.8, 0.8, "S");
+    const left = x + ETQ.insetX, larg = W - 2 * ETQ.insetX, cx = x + W / 2;
+    let topo = y + ETQ.insetY;
+    doc.setTextColor(0, 0, 0);
 
+    /* 0. logotipo centralizado */
     const logo = safeImg(cfg.logoDataUrl);
-    /* marca-d'água bem clara do logo, ao centro */
     if (logo){
       try{
-        const t = encaixarImagem(doc, logo, W * 0.55, H * 0.6);
-        doc.saveGraphicsState(); doc.setGState(new doc.GState({ opacity: 0.07 }));
-        doc.addImage(logo, logoImageFormat(logo), x + (W - t.w) / 2, y + (H - t.h) / 2 + 2, t.w, t.h);
-        doc.restoreGraphicsState();
-      }catch(e){ /* formato de imagem não suportado — segue sem marca-d'água */ }
-    }
-
-    const left = x + 4.4, larg = W - 8.8, cx = x + W / 2;
-    let cy = y + 4.0;
-
-    /* topo: logo + nome do presbitério em versalete */
-    if (logo){
-      try{
-        const t = encaixarImagem(doc, logo, 22, 6.2);
-        doc.addImage(logo, logoImageFormat(logo), cx - t.w / 2, cy, t.w, t.h);
-        cy += t.h + 0.6;
+        const t = encaixarImagem(doc, logo, ETQ.logoW, ETQ.logoH);
+        doc.addImage(logo, logoImageFormat(logo), cx - t.w / 2, topo + (ETQ.logoH - t.h) / 2, t.w, t.h);
       }catch(e){}
-    }
-    const presb = (cfg.nomePresbiterio || "").trim();
-    if (presb){
-      doc.setFont("helvetica", "bold"); doc.setFontSize(4.6); doc.setTextColor(...ETQ.douradoTexto);
-      doc.setCharSpace(0.25);
-      doc.text(presb.toUpperCase(), cx, cy + 1.6, { align: "center", maxWidth: larg });
-      doc.setCharSpace(0);
-      cy += 2.6;
+      topo += ETQ.logoH + 0.35;
     }
 
-    /* nome em destaque (serifa) + divisor com losango */
-    doc.setFont("times", "bold"); doc.setTextColor(...ETQ.tinta);
-    let nomeFs = 10;
-    doc.setFontSize(nomeFs);
-    while (doc.getTextWidth(m.nome) > larg && nomeFs > 7.2){ nomeFs -= 0.2; doc.setFontSize(nomeFs); }
-    const nomeLinhas = doc.splitTextToSize(m.nome, larg).slice(0, 2);
-    nomeLinhas.forEach((l, i) => doc.text(l, cx, cy + 3.3 + i * nomeFs * 0.36, { align: "center" }));
-    cy += 3.3 + (nomeLinhas.length - 1) * nomeFs * 0.36 + 1.4;
-    doc.setDrawColor(...ETQ.dourado); doc.setLineWidth(0.15);
-    doc.line(cx - 13, cy, cx - 1.8, cy); doc.line(cx + 1.8, cy, cx + 13, cy);
-    losango(doc, cx, cy, 0.9, ETQ.dourado);
-    cy += 2.2;
-
-    /* rodapé: assinatura + nome + cargo (de baixo para cima) */
-    const base = y + H - 4.1;
-    let topoRodape = base;
+    /* rodapé: nome do secretário + "Secretário Executivo", na posição do modelo */
+    const rodTopo = y + ETQ.rodapeTopo;
+    const passoRod = 7.5 * PT * 1.21;
+    let limiteCorpo = rodTopo - 0.6;
     if (cfg.secretarioNome){
-      doc.setTextColor(...ETQ.tinta);
-      doc.setFont("helvetica", "bold"); doc.setFontSize(5.4);
-      doc.text(cfg.secretarioCargo || "Secretário Executivo", cx, base, { align: "center" });
-      doc.setFont("helvetica", "normal"); doc.setFontSize(5.6);
-      doc.text(cfg.secretarioNome, cx, base - 2.2, { align: "center" });
-      topoRodape = base - 4.4;
+      usar(false); doc.setFontSize(7.5);
+      doc.text(cfg.secretarioNome, cx, rodTopo + passoRod * 0.78, { align: "center" });
+      usar(true);
+      doc.text(cfg.secretarioCargo || "Secretário Executivo", cx, rodTopo + passoRod * 1.78, { align: "center" });
       const ass = safeImg(cfg.assinaturaImagemDataUrl);
       if (ass){
         try{
-          const t = encaixarImagem(doc, ass, 24, 6.4);
-          doc.addImage(ass, logoImageFormat(ass), cx - t.w / 2, topoRodape - t.h + 1.6, t.w, t.h);
-          topoRodape -= t.h * 0.62; // a imagem tem margem transparente em cima
+          const t = encaixarImagem(doc, ass, 26, 7.2);
+          const yImg = rodTopo - t.h + 2.0; // a imagem tem margem transparente; encosta no nome
+          doc.addImage(ass, logoImageFormat(ass), cx - t.w / 2, yImg, t.w, t.h);
+          limiteCorpo = yImg + t.h * 0.2;
         }catch(e){}
       }
     }
-    const limite = topoRodape - 0.8;
 
-    /* corpo: texto oficial justificado + registros com losango dourado.
-       Começa num tamanho confortável e só diminui o necessário para
-       caber acima do rodapé (nunca corta texto). */
+    /* 1–5. nome, texto oficial, registros e comissões — tamanhos do
+       modelo (nome 8,5 pt; texto 7,5 pt; título 8,5 pt), reduzidos juntos
+       só se não couberem acima do rodapé. */
     const gi = GRUPOS_REUNIAO.find(g => g.id === m.grupo) || { alinea: "a", rotulo: "membro efetivo" };
     const segs = montarSegmentosEtiqueta(r, gi);
-    const regs = participacoesLinhas(r, m.nome);
-    const recuo = 2.2;
-    /* drawJustifiedMixedText recebe a linha de base da 1ª linha e devolve
-       a linha de base da próxima; 1 pt = 0,353 mm. */
-    function corpo(fs, medir){
-      const lh = fs * 0.41;
-      let base = cy + lh * 0.8;
-      doc.setTextColor(...ETQ.tinta);
-      base = drawJustifiedMixedText(doc, segs, left, base, larg, fs, lh, true, medir);
-      if (regs.length) base += lh * 0.3;
-      regs.forEach(t => {
-        if (!medir) losango(doc, left + 0.7, base - fs * 0.11, 0.55, ETQ.dourado);
-        doc.setTextColor(...ETQ.tinta);
-        base = drawJustifiedMixedText(doc, [{ text: t, bold: false }], left + recuo, base, larg - recuo, fs * 0.95, lh * 0.95, false, medir);
+    const { outros, comissoes } = registrosEtiqueta(r, m.nome);
+    function bloco(escala, medir){
+      const fsNome = 8.5 * escala, fs = 7.5 * escala, fsTit = 8.5 * escala;
+      const passo = fs * PT * 1.21, passoTit = fsTit * PT * 1.21;
+      let t = topo;
+      /* nome da pessoa, negrito, centralizado (até 2 linhas) */
+      /* nome da pessoa, negrito, centralizado: diminui até caber numa
+         linha (mínimo ~6,8 pt); se ainda não couber, quebra em duas */
+      usar(true);
+      let fsN = fsNome;
+      doc.setFontSize(fsN);
+      while (larguraTexto(doc, m.nome) > larg && fsN > 6.8 * escala){ fsN -= 0.1; doc.setFontSize(fsN); }
+      const passoN = fsN * PT * 1.21;
+      const linhasNome = larguraTexto(doc, m.nome) > larg ? doc.splitTextToSize(m.nome, larg).slice(0, 2) : [m.nome];
+      linhasNome.forEach(l => { if (!medir) doc.text(l, cx, t + passoN * 0.78, { align: "center" }); t += passoN; });
+      t += 2 * PT; // parágrafo vazio de 2 pt do modelo
+      /* texto oficial justificado */
+      t = drawJustifiedMixedText(doc, segs, left, t + passo * 0.78, larg, fs, passo, true, medir, fam, estiloNegrito) - passo * 0.78;
+      if (outros.length || comissoes.length) t += 1 * PT; // parágrafo vazio de 1 pt
+      outros.forEach(linha => {
+        t = drawJustifiedMixedText(doc, [{ text: linha, bold: false }], left, t + passo * 0.78, larg, fs, passo, false, medir, fam, estiloNegrito) - passo * 0.78;
       });
-      return base - lh + fs * 0.1; // fim da última linha escrita
+      if (comissoes.length){
+        usar(true); doc.setFontSize(fsTit);
+        if (!medir) doc.text(comissoes.length > 1 ? "Participou das Comissões:" : "Participou da Comissão:", left, t + passoTit * 0.78);
+        t += passoTit;
+        comissoes.forEach(linha => {
+          t = drawJustifiedMixedText(doc, [{ text: linha, bold: false }], left, t + passo * 0.78, larg, fs, passo, false, medir, fam, estiloNegrito) - passo * 0.78;
+        });
+      }
+      return t;
     }
-    let fs = 7.6; // o modelo usa 7,5 pt; só diminui se não couber
-    while (fs > 4.6 && corpo(fs, true) > limite) fs -= 0.1;
-    corpo(fs, false);
+    let escala = 1;
+    while (escala > 0.72 && bloco(escala, true) > limiteCorpo) escala -= 0.02;
+    doc.setTextColor(0, 0, 0);
+    bloco(escala, false);
   }
 
-  function gerarEtiquetasPDF(r){
+  async function gerarEtiquetasPDF(r){
     if (!window.jspdf || !r) return null;
     const presentes = presentesParaEtiqueta(r);
     if (presentes.length === 0) return null;
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "landscape" });
+    const fonte = await carregarFonteEtiqueta(doc);
     const porPagina = ETQ.cols * ETQ.rows;
-    const x0 = (ETQ.pageW - (ETQ.cols * ETQ.w + (ETQ.cols - 1) * ETQ.gap)) / 2;
-    const y0 = (ETQ.pageH - (ETQ.rows * ETQ.h + (ETQ.rows - 1) * ETQ.gap)) / 2;
     presentes.forEach((m, idx) => {
       const pos = idx % porPagina;
       if (idx > 0 && pos === 0) doc.addPage("a4", "landscape");
       const col = pos % ETQ.cols, lin = Math.floor(pos / ETQ.cols);
-      desenharEtiqueta(doc, r, m, x0 + col * (ETQ.w + ETQ.gap), y0 + lin * (ETQ.h + ETQ.gap));
+      desenharEtiqueta(doc, r, m, ETQ.x0 + col * ETQ.passoX, ETQ.y0 + lin * ETQ.passoY, fonte);
     });
     doc.setProperties({ title: `Etiquetas de presença — ${fmtPeriodoCurto(r)}` });
+    if (fonte.falhou) showToast("A fonte da etiqueta não pôde ser usada; as etiquetas saíram em Helvetica.", "error");
     return doc;
   }
 
@@ -645,7 +672,7 @@
   async function baixarEtiquetas(r){
     if (!r) return;
     if (presentesParaEtiqueta(r).length === 0){ await alertModal("Ainda não há presentes registrados nesta reunião."); return; }
-    const pdfDoc = gerarEtiquetasPDF(r);
+    const pdfDoc = await gerarEtiquetasPDF(r);
     if (!pdfDoc){ await alertModal("Não foi possível gerar o PDF das etiquetas agora."); return; }
     const blob = pdfDoc.output("blob");
     try{
@@ -669,10 +696,10 @@
   async function imprimirEtiquetas(r){
     if (!r) return;
     if (presentesParaEtiqueta(r).length === 0){ await alertModal("Ainda não há presentes registrados nesta reunião."); return; }
-    const pdfDoc = gerarEtiquetasPDF(r);
+    const pdfDoc = await gerarEtiquetasPDF(r);
     if (!pdfDoc){ await alertModal("Não foi possível gerar as etiquetas agora."); return; }
     abrirPdfNoVisualizador(pdfDoc.output("blob"), `Etiquetas — ${fmtPeriodoCurto(r)}`,
-      "Na impressão, escolha papel A4, orientação paisagem e escala \"Tamanho real\" (100%). Recorte pela linha tracejada.");
+      "Na impressão, escolha papel A4, orientação paisagem e escala \"Tamanho real\" (100%). Recorte pela borda verde.");
   }
 
   /* ============================================================
@@ -3288,6 +3315,37 @@
       setSlice("config", { ...cfg(), ...draft });
     }
 
+    /* Fonte própria da etiqueta (ex.: ZapfHumnst BT, do modelo do Word).
+       O arquivo vai para o Storage privado da conta (ou fica no navegador,
+       no modo local) — nunca para o repositório, que é público. */
+    async function onFonteEtiquetaFile(estilo, file){
+      if (!file) return;
+      if (!/\.ttf$/i.test(file.name)){ await alertModal("Envie o arquivo da fonte no formato .ttf (TrueType)."); return; }
+      if (file.size > 2 * 1024 * 1024){ await alertModal("O arquivo da fonte passa de 2 MB."); return; }
+      try{
+        const { jsPDF } = window.jspdf;
+        const teste = new jsPDF();
+        teste.addFileToVFS("t.ttf", await blobParaBase64(file));
+        teste.addFont("t.ttf", "T", "normal"); teste.setFont("T", "normal"); teste.getTextWidth("Compareceu à reunião");
+      }catch(e){ await alertModal("Este arquivo não pôde ser lido como fonte TrueType. Verifique se é o .ttf correto."); return; }
+      const atual = cfg().fonteEtiqueta || {};
+      const antigo = atual[estilo];
+      let guardado;
+      try{ guardado = await guardarArquivoAnexo(`fonte-etiqueta-${estilo}-${uid()}`, file.name, file); }
+      catch(e){ await alertModal("Não foi possível enviar o arquivo da fonte agora. Tente novamente."); return; }
+      if (antigo) apagarArquivosAnexos([antigo]);
+      const fonteEtiqueta = { ...atual, [estilo]: { id: uid(), nome: file.name, tamanho: file.size, ...guardado } };
+      await setSlice("config", { ...cfg(), ...draft, fonteEtiqueta });
+    }
+    async function removerFonteEtiqueta(){
+      const atual = cfg().fonteEtiqueta;
+      if (!atual) return;
+      if (!(await confirmModal("Remover a fonte da etiqueta? As etiquetas voltam a sair em Helvetica."))) return;
+      apagarArquivosAnexos([atual.normal, atual.negrito].filter(Boolean));
+      const { fonteEtiqueta, ...resto } = cfg();
+      await setSlice("config", { ...resto, ...draft });
+    }
+
     function onAssinaturaFile(file){
       if (!file) return;
       const reader = new FileReader();
@@ -3379,6 +3437,18 @@
           `}
         </div>
 
+        <div style="margin-top:14px;">
+          <label class="field-label">Fonte das etiquetas de presença (opcional)</label>
+          <p class="section-sub" style="margin:0 0 8px;">Para as etiquetas saírem na mesma letra do seu modelo do Word (ex.: ZapfHumnst BT), envie os arquivos .ttf da fonte normal e da negrito. Eles ficam guardados só na sua conta. Sem fonte enviada, as etiquetas saem em Helvetica.</p>
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            ${["normal", "negrito"].map(estilo => {
+              const f = (cfg().fonteEtiqueta || {})[estilo];
+              return `<label class="btn btn-sm" style="cursor:pointer;">${icon(f ? "check" : "upload", 13)} ${estilo === "normal" ? "Normal" : "Negrito"}: ${f ? esc(f.nome) : "enviar .ttf"}<input type="file" accept=".ttf,font/ttf" data-fonte-etiqueta="${estilo}" style="display:none;"></label>`;
+            }).join("")}
+            ${cfg().fonteEtiqueta ? `<button class="btn btn-sm" id="cfg-fonte-remove">${icon("x", 12)} Remover fonte</button>` : ""}
+          </div>
+        </div>
+
         <div style="display:grid; grid-template-columns:1.6fr 120px; gap:12px; margin-top:14px;">
           <div>
             <label class="field-label">Nome do Sínodo ao qual este presbitério pertence</label>
@@ -3416,6 +3486,9 @@
       if (assinaturaFile) assinaturaFile.addEventListener("change", e => onAssinaturaFile(e.target.files[0]));
       const assinaturaRemove = container.querySelector("#cfg-assinatura-remove");
       if (assinaturaRemove) assinaturaRemove.addEventListener("click", removerAssinatura);
+      container.querySelectorAll("[data-fonte-etiqueta]").forEach(el => el.addEventListener("change", e => onFonteEtiquetaFile(el.getAttribute("data-fonte-etiqueta"), e.target.files[0])));
+      const fonteRemove = container.querySelector("#cfg-fonte-remove");
+      if (fonteRemove) fonteRemove.addEventListener("click", removerFonteEtiqueta);
       const assinaturaGerar = container.querySelector("#assinatura-gerar");
       if (assinaturaGerar) assinaturaGerar.addEventListener("click", gerarAssinaturaAutomatica);
       container.querySelector("#cfg-salvar").addEventListener("click", salvarConfig);
