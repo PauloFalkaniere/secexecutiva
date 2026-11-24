@@ -166,19 +166,31 @@
       document.getElementById("modal-ok").addEventListener("click", finalizar);
     });
   }
-  function abrirVisualizadorAnexo(anexo){
+  async function abrirVisualizadorAnexo(anexo){
     const root = document.getElementById("modal-root");
     if (!root) return;
     const ehPdf = (anexo.tipo === "application/pdf") || /\.pdf$/i.test(anexo.nome || "");
-    let corpo;
-    if (ehPdf){
-      /* Força o tipo PDF: um arquivo disfarçado (ex.: HTML com nome .pdf)
-         nunca é interpretado como página dentro do nosso domínio. */
-      _modalObjectUrl = URL.createObjectURL(new Blob([anexo.arquivo], { type: "application/pdf" }));
-      corpo = `<iframe class="modal-pdf-frame" src="${_modalObjectUrl}"></iframe>`;
-    } else {
-      corpo = `<div class="modal-fallback">Visualização disponível apenas para arquivos PDF.<br>Use o botão de download para abrir este arquivo.</div>`;
+    if (!ehPdf){
+      montarVisualizador(root, anexo, `<div class="modal-fallback">Visualização disponível apenas para arquivos PDF.<br>Use o botão de download para abrir este arquivo.</div>`);
+      return;
     }
+    montarVisualizador(root, anexo, `<div class="modal-fallback">Carregando o arquivo…</div>`);
+    let blob = null;
+    try{ blob = await obterArquivoAnexo(anexo); }
+    catch(e){ console.warn("Falha ao baixar anexo", e); }
+    if (!document.getElementById("modal-box")) return; // fechado enquanto carregava
+    if (!blob){
+      montarVisualizador(root, anexo, `<div class="modal-fallback">${anexoDisponivel(anexo)
+        ? "Não foi possível carregar este arquivo agora. Verifique a conexão e tente novamente."
+        : "Este arquivo não está mais guardado no sistema. Remova este anexo e anexe o PDF novamente."}</div>`);
+      return;
+    }
+    /* Força o tipo PDF: um arquivo disfarçado (ex.: HTML com nome .pdf)
+       nunca é interpretado como página dentro do nosso domínio. */
+    _modalObjectUrl = URL.createObjectURL(new Blob([blob], { type: "application/pdf" }));
+    montarVisualizador(root, anexo, `<iframe class="modal-pdf-frame" src="${_modalObjectUrl}" title="${esc(anexo.nome)}"></iframe>`);
+  }
+  function montarVisualizador(root, anexo, corpo){
     root.innerHTML = `
       <div class="modal-backdrop" id="modal-backdrop">
         <div class="modal-box" id="modal-box">
@@ -670,12 +682,62 @@
     return true;
   }
 
+  /* ============================================================
+     Arquivos dos anexos
+     - Modo nuvem: cada arquivo vai para o bucket privado "anexos" do
+       Supabase Storage, na pasta <id do usuário>/. As regras do bucket
+       (veja schema.sql) só deixam cada conta ler e apagar a própria
+       pasta. Nos dados fica apenas o caminho (anexo.storagePath).
+     - Modo local: o arquivo (Blob) fica no IndexedDB junto com os dados.
+     ============================================================ */
+  const ANEXOS_BUCKET = "anexos";
+  const ANEXO_MAX_BYTES = 25 * 1024 * 1024; // mesmo limite do bucket
+  const _anexoCache = new Map();
+
+  function anexoDisponivel(anexo){
+    return !!(anexo && (anexo.storagePath || anexo.arquivo instanceof Blob));
+  }
+
+  async function guardarArquivoAnexo(anexoId, nome, blob){
+    if (!CLOUD_ATIVO) return { arquivo: blob };
+    const ext = ((/\.([a-z0-9]{1,8})$/i.exec(nome || "") || [])[1] || "bin").toLowerCase();
+    const caminho = `${CURRENT_USER.id}/${anexoId}.${ext}`;
+    const { error } = await supa.storage.from(ANEXOS_BUCKET).upload(caminho, blob, {
+      contentType: blob.type || "application/octet-stream", upsert: false,
+    });
+    if (error) throw error;
+    _anexoCache.set(caminho, blob);
+    return { storagePath: caminho };
+  }
+
+  async function obterArquivoAnexo(anexo){
+    if (!anexo) return null;
+    if (anexo.arquivo instanceof Blob) return anexo.arquivo;
+    if (!anexo.storagePath || !CLOUD_ATIVO) return null;
+    if (_anexoCache.has(anexo.storagePath)) return _anexoCache.get(anexo.storagePath);
+    const { data, error } = await supa.storage.from(ANEXOS_BUCKET).download(anexo.storagePath);
+    if (error) throw error;
+    _anexoCache.set(anexo.storagePath, data);
+    return data;
+  }
+
+  async function apagarArquivosAnexos(anexos){
+    const caminhos = (anexos || []).map(a => a && a.storagePath).filter(Boolean);
+    caminhos.forEach(c => _anexoCache.delete(c));
+    if (!CLOUD_ATIVO || caminhos.length === 0) return;
+    const { error } = await supa.storage.from(ANEXOS_BUCKET).remove(caminhos);
+    if (error) console.warn("Não foi possível apagar arquivo(s) do Storage", error);
+  }
+
   /* Grava o STATE inteiro em uma única linha do usuário logado (modo nuvem). */
   async function persistState(){
     if (!CLOUD_ATIVO || !CURRENT_USER) return false;
+    /* O conteúdo dos anexos nunca vai para esta linha (ele fica no
+       Supabase Storage); aqui só ficam nome, tamanho e caminho. */
+    const dados = JSON.parse(JSON.stringify(STATE, (k, v) => k === "arquivo" ? undefined : v));
     const { error } = await supa
       .from("secex_data")
-      .upsert({ user_id: CURRENT_USER.id, data: STATE, updated_at: new Date().toISOString() });
+      .upsert({ user_id: CURRENT_USER.id, data: dados, updated_at: new Date().toISOString() });
     if (error) console.warn("Falha ao salvar na nuvem", error);
     return !error;
   }
@@ -1206,7 +1268,12 @@
     function filtroAtivo(){ return !!(filtro.origem.trim() || filtro.ano || filtro.assunto.trim()); }
 
     function update(doc){ const key = arrayKey(doc.tipo); setSlice(key, docsDe(doc.tipo).map(d => d.id === doc.id ? doc : d)); }
-    async function remove(id){ if(!(await confirmModal("Excluir este documento do protocolo?"))) return; setSlice(arrayKey(subTab), docs().filter(d => d.id !== id)); }
+    async function remove(id){
+      if(!(await confirmModal("Excluir este documento do protocolo?"))) return;
+      const doc = docs().find(d => d.id === id);
+      if (doc) apagarArquivosAnexos(doc.anexos);
+      setSlice(arrayKey(subTab), docs().filter(d => d.id !== id));
+    }
 
     function logar(doc, texto, patch){
       update({ ...doc, ...(patch || {}), historico: [...doc.historico, { data: todayISO(), texto }] });
@@ -1251,8 +1318,14 @@
     }
 
     async function downloadAnexo(anexo){
+      if (!anexoDisponivel(anexo)){
+        await alertModal(`"${anexo.nome}" não está mais guardado no sistema. Remova este anexo e anexe o arquivo novamente.`);
+        return;
+      }
       try{
-        await saveFile({ filename: anexo.nome, data: anexo.arquivo });
+        const blob = await obterArquivoAnexo(anexo);
+        if (!blob) throw new Error("arquivo indisponível");
+        await saveFile({ filename: anexo.nome, data: blob });
       }catch(err){
         const code = err && err.code;
         if (code === "rejected_extension" || code === "extension_not_enabled"){
@@ -1277,7 +1350,10 @@
       const arquivos = Array.from(fileList);
       const invalidos = [];
       const validos = [];
+      const falhas = [];
+      const grandes = [];
       for (const f of arquivos){
+        if (f.size > ANEXO_MAX_BYTES){ grandes.push(f.name); continue; }
         if (!isSaida){
           const ehPdf = f.type === "application/pdf" || /\.pdf$/i.test(f.name);
           if (!ehPdf){ invalidos.push(f.name); continue; }
@@ -1297,7 +1373,21 @@
             if (stamped){ arquivoFinal = stamped; carimbado = true; }
           }catch(e){ console.warn("Não foi possível carimbar o anexo, mantendo o arquivo original", e); }
         }
-        validos.push({ id: uid(), nome: f.name, tipo: f.type || "application/octet-stream", tamanho: arquivoFinal.size, arquivo: arquivoFinal, carimbado });
+        const id = uid();
+        try{
+          if (CLOUD_ATIVO) showToast(`Enviando "${f.name}"…`, "success");
+          const guardado = await guardarArquivoAnexo(id, f.name, arquivoFinal);
+          validos.push({ id, nome: f.name, tipo: f.type || "application/octet-stream", tamanho: arquivoFinal.size, carimbado, ...guardado });
+        }catch(e){
+          console.warn("Falha ao enviar anexo", e);
+          falhas.push(f.name);
+        }
+      }
+      if (grandes.length){
+        await alertModal(`Arquivo(s) maior(es) que 25 MB não foram anexados: ${grandes.join(", ")}`);
+      }
+      if (falhas.length){
+        await alertModal(`Não foi possível enviar: ${falhas.join(", ")}. Verifique a conexão e tente novamente.`);
       }
       if (invalidos.length){
         await alertModal(`Só é possível anexar arquivos em PDF, para que o carimbo do protocolo seja aplicado automaticamente. Não anexado(s): ${invalidos.join(", ")}`);
@@ -1309,6 +1399,7 @@
     }
     function removerAnexo(doc, anexoId){
       const anexo = (doc.anexos || []).find(a => a.id === anexoId);
+      if (anexo) apagarArquivosAnexos([anexo]);
       logar(doc, `Anexo removido: ${anexo ? anexo.nome : ""}`, { anexos: (doc.anexos || []).filter(a => a.id !== anexoId) });
     }
 
@@ -1429,6 +1520,7 @@
                     <a href="#" data-download="${doc.id}:${a.id}">${esc(a.nome)}</a>
                     <span class="attach-size">${fmtSize(a.tamanho)}</span>
                     ${a.carimbado ? `<span title="Carimbado com o protocolo">${icon("stamp", 12)}</span>` : ""}
+                    ${anexoDisponivel(a) ? "" : `<span class="attach-lost" title="O arquivo se perdeu numa versão anterior do sistema. Remova e anexe de novo.">arquivo perdido — anexe novamente</span>`}
                     <button class="btn-icon" style="padding:0;" data-visualizar-anexo="${doc.id}:${a.id}" title="Visualizar">${icon("eye", 13)}</button>
                     <button class="btn-icon" style="padding:0;" data-remove-anexo="${doc.id}:${a.id}" title="Remover anexo">${icon("x", 12)}</button>
                   </span>
