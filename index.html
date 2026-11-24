@@ -4,6 +4,15 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Secretaria Executiva</title>
+<!--
+  Política de segurança de conteúdo (CSP): limita de onde o navegador
+  aceita carregar scripts, estilos, imagens e para onde a página pode
+  enviar dados (apenas o Supabase). Reduz o estrago de uma eventual
+  injeção de código. O GitHub Pages não permite cabeçalhos HTTP próprios,
+  por isso ela vai aqui como <meta>.
+-->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; frame-src blob:; worker-src 'self' blob:; connect-src 'self' data: blob: https://*.supabase.co wss://*.supabase.co; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&family=Dancing+Script:wght@500;700&display=swap" rel="stylesheet">
@@ -16,7 +25,15 @@
   normalmente no modo local (dados salvos só neste navegador, sem login).
 -->
 <script src="config.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!--
+  Biblioteca do Supabase com versão FIXA e verificação de integridade
+  (SRI): se o arquivo no CDN for alterado, o navegador se recusa a
+  executá-lo. Para atualizar a versão, troque o número e recalcule o
+  hash "integrity" (ex.: https://www.srihash.org).
+-->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"
+        integrity="sha384-TcHRA3zBbn+Lexh5n+Oil4guNPOS3rjNDpGRAN46u/s/mB2IZ50ceC6TYDU2yvgK"
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <style>
   /* ============================================================
      Secretaria Executiva — ficha de registro de um presbitério.
@@ -686,6 +703,14 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
     }[c]));
   }
+  /* Só aceita imagens embutidas (data URL base64) em formatos raster
+     comuns. Os dados de logo/assinatura vêm do banco e são inseridos em
+     atributos src/style: sem esta checagem, um valor adulterado (ex.:
+     com aspas ou "javascript:") poderia injetar HTML/JS na página. */
+  const SAFE_IMG_DATA_URL = /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+\/]+=*$/i;
+  function safeImg(url){
+    return (typeof url === "string" && SAFE_IMG_DATA_URL.test(url)) ? url : "";
+  }
 
   /* ============================================================
      Ícones (SVG inline, minimalistas)
@@ -825,7 +850,9 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     const ehPdf = (anexo.tipo === "application/pdf") || /\.pdf$/i.test(anexo.nome || "");
     let corpo;
     if (ehPdf){
-      _modalObjectUrl = URL.createObjectURL(anexo.arquivo);
+      /* Força o tipo PDF: um arquivo disfarçado (ex.: HTML com nome .pdf)
+         nunca é interpretado como página dentro do nosso domínio. */
+      _modalObjectUrl = URL.createObjectURL(new Blob([anexo.arquivo], { type: "application/pdf" }));
       corpo = `<iframe class="modal-pdf-frame" src="${_modalObjectUrl}"></iframe>`;
     } else {
       corpo = `<div class="modal-fallback">Visualização disponível apenas para arquivos PDF.<br>Use o botão de download para abrir este arquivo.</div>`;
@@ -1376,7 +1403,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
           </div>
           <div class="field-row">
             <label class="field-label">Senha</label>
-            <input type="password" id="auth-senha" autocomplete="${authMode === "signup" ? "new-password" : "current-password"}" placeholder="Mínimo 6 caracteres">
+            <input type="password" id="auth-senha" autocomplete="${authMode === "signup" ? "new-password" : "current-password"}" placeholder="${authMode === "signup" ? "Mínimo 8 caracteres" : "Sua senha"}">
           </div>
           <button class="btn btn-primary" id="auth-submit" style="width:100%; justify-content:center; margin-bottom:10px;" ${authBusy ? "disabled" : ""}>
             ${authBusy ? "Aguarde…" : (authMode === "signup" ? "Criar conta" : "Entrar")}
@@ -1403,7 +1430,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     const email = document.getElementById("auth-email").value.trim();
     const senha = document.getElementById("auth-senha").value;
     if (!email || !senha){ authError = "Preencha e-mail e senha."; renderAuthGate(); return; }
-    if (senha.length < 6){ authError = "A senha precisa ter pelo menos 6 caracteres."; renderAuthGate(); return; }
+    if (authMode === "signup" && senha.length < 8){ authError = "A senha precisa ter pelo menos 8 caracteres."; renderAuthGate(); return; }
     authBusy = true; authError = ""; renderAuthGate();
     const { data, error } = authMode === "signup"
       ? await supa.auth.signUp({ email, password: senha })
@@ -1435,8 +1462,8 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
      ============================================================ */
   function pillHtml(label, tone, opts){
     opts = opts || {};
-    const wm = (opts.watermark && STATE.config && STATE.config.logoDataUrl)
-      ? `<span class="pill-wm" style="background-image:url('${STATE.config.logoDataUrl}')"></span>` : "";
+    const wm = (opts.watermark && STATE.config && safeImg(STATE.config.logoDataUrl))
+      ? `<span class="pill-wm" style="background-image:url('${safeImg(STATE.config.logoDataUrl)}')"></span>` : "";
     const dot = opts.dot ? '<span class="pill-dot"></span>' : "";
     return `<span class="pill pill-${tone}">${wm}${dot}<span class="pill-label">${esc(label)}</span></span>`;
   }
@@ -1447,7 +1474,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
   function letterheadHtml(){
     const cfg = STATE.config || {};
     const logo = cfg.logoDataUrl
-      ? `<img class="ph-logo" src="${cfg.logoDataUrl}" alt="">`
+      ? `<img class="ph-logo" src="${safeImg(cfg.logoDataUrl)}" alt="">`
       : `<div class="ph-logo-fallback">${esc(cfg.sigla || "SE")}</div>`;
     return `<div class="print-letterhead">${logo}<div><div class="ph-name">${esc(cfg.nomePresbiterio || "Secretaria executiva")}</div><div class="ph-sub">Documento gerado em ${fmtDate(todayISO())}</div></div></div>`;
   }
@@ -1455,7 +1482,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     opts = opts || {};
     const area = document.getElementById("print-area");
     const wm = (opts.watermark && STATE.config && STATE.config.logoDataUrl)
-      ? `<div class="print-watermark" style="background-image:url('${STATE.config.logoDataUrl}')"></div>` : "";
+      ? `<div class="print-watermark" style="background-image:url('${safeImg(STATE.config.logoDataUrl)}')"></div>` : "";
     area.innerHTML = `${wm}<div class="print-page"><h1 class="print-title">${esc(titulo)}</h1>${letterheadHtml()}<div class="print-body">${innerHtml}</div></div>`;
     window.print();
   }
@@ -1589,7 +1616,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     const cfg = STATE.config || {};
     document.getElementById("brand-title").textContent = cfg.nomePresbiterio || "Secretaria executiva";
     const mark = document.getElementById("brand-mark");
-    mark.innerHTML = cfg.logoDataUrl ? `<img src="${cfg.logoDataUrl}" alt="">` : esc(cfg.sigla || "SE");
+    mark.innerHTML = safeImg(cfg.logoDataUrl) ? `<img src="${safeImg(cfg.logoDataUrl)}" alt="">` : esc(cfg.sigla || "SE");
   }
 
   function renderNav(){
@@ -2541,10 +2568,10 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
       const presentes = r.membros.filter(m => m.presenca === "Presente");
       if (presentes.length === 0){ await alertModal("Ainda não há presentes registrados nesta reunião."); return; }
       const cfg = STATE.config || {};
-      const wm = cfg.logoDataUrl ? `<img class="badge-wm" src="${cfg.logoDataUrl}" alt="">` : "";
+      const wm = safeImg(cfg.logoDataUrl) ? `<img class="badge-wm" src="${safeImg(cfg.logoDataUrl)}" alt="">` : "";
       const sigHtml = cfg.secretarioNome ? `
         <div class="badge-sig">
-          ${cfg.assinaturaImagemDataUrl ? `<img class="badge-sig-img" src="${cfg.assinaturaImagemDataUrl}" alt="Assinatura">` : ""}
+          ${safeImg(cfg.assinaturaImagemDataUrl) ? `<img class="badge-sig-img" src="${safeImg(cfg.assinaturaImagemDataUrl)}" alt="Assinatura">` : ""}
           <div>${esc(cfg.secretarioNome)}</div>
           <div class="badge-sig-cargo">${esc(cfg.secretarioCargo || "Secretário Executivo")}</div>
         </div>` : "";
@@ -3380,7 +3407,8 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     function onLogoFile(file){
       if (!file) return;
       const reader = new FileReader();
-      reader.onload = () => {
+      reader.onload = async () => {
+        if (!safeImg(reader.result)){ await alertModal("Envie uma imagem PNG, JPG, GIF ou WEBP."); return; }
         draft.logoDataUrl = reader.result;
         setSlice("config", { ...cfg(), ...draft });
       };
@@ -3394,7 +3422,8 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
     function onAssinaturaFile(file){
       if (!file) return;
       const reader = new FileReader();
-      reader.onload = () => {
+      reader.onload = async () => {
+        if (!safeImg(reader.result)){ await alertModal("Envie uma imagem PNG para a assinatura."); return; }
         draft.assinaturaImagemDataUrl = reader.result;
         draft.assinaturaTipo = "imagem";
         setSlice("config", { ...cfg(), ...draft });
@@ -3425,7 +3454,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
           <div>
             <label class="field-label">Logo do presbitério</label>
             <div style="display:flex; align-items:center; gap:12px;">
-              <div class="logo-preview">${draft.logoDataUrl ? `<img src="${draft.logoDataUrl}" alt="Logo">` : `<span style="color:var(--muted); font-size:11px;">sem logo</span>`}</div>
+              <div class="logo-preview">${safeImg(draft.logoDataUrl) ? `<img src="${safeImg(draft.logoDataUrl)}" alt="Logo">` : `<span style="color:var(--muted); font-size:11px;">sem logo</span>`}</div>
               <div style="display:flex; flex-direction:column; gap:6px;">
                 <label class="btn btn-sm" style="cursor:pointer; width:fit-content;">${icon("upload", 13)} Enviar imagem<input type="file" accept="image/*" id="cfg-logo-file" style="display:none;"></label>
                 ${draft.logoDataUrl ? `<button class="btn btn-sm" id="cfg-logo-remove">${icon("x", 12)} Remover logo</button>` : ""}
@@ -3465,7 +3494,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
           ${draft.assinaturaTipo === "gerada" ? `
             <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
               <div style="border:1px solid var(--line); border-radius:6px; background:#fff; padding:6px 16px; min-height:56px; display:flex; align-items:center;">
-                ${draft.assinaturaImagemDataUrl ? `<img src="${draft.assinaturaImagemDataUrl}" alt="Assinatura gerada" style="height:48px;">` : `<span style="color:var(--muted); font-size:12px;">Nenhuma assinatura gerada ainda.</span>`}
+                ${safeImg(draft.assinaturaImagemDataUrl) ? `<img src="${safeImg(draft.assinaturaImagemDataUrl)}" alt="Assinatura gerada" style="height:48px;">` : `<span style="color:var(--muted); font-size:12px;">Nenhuma assinatura gerada ainda.</span>`}
               </div>
               <button class="btn btn-sm" id="assinatura-gerar">${icon("check", 13)} Gerar/atualizar assinatura</button>
               ${draft.assinaturaImagemDataUrl ? `<button class="btn btn-sm" id="cfg-assinatura-remove">${icon("x", 12)} Remover</button>` : ""}
@@ -3473,7 +3502,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var n,r,i,a,
           ` : `
             <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
               <div style="border:1px solid var(--line); border-radius:6px; background:#fff; padding:6px 16px; min-height:56px; display:flex; align-items:center;">
-                ${draft.assinaturaImagemDataUrl ? `<img src="${draft.assinaturaImagemDataUrl}" alt="Assinatura enviada" style="height:48px;">` : `<span style="color:var(--muted); font-size:12px;">Nenhuma imagem enviada ainda.</span>`}
+                ${safeImg(draft.assinaturaImagemDataUrl) ? `<img src="${safeImg(draft.assinaturaImagemDataUrl)}" alt="Assinatura enviada" style="height:48px;">` : `<span style="color:var(--muted); font-size:12px;">Nenhuma imagem enviada ainda.</span>`}
               </div>
               <label class="btn btn-sm" style="cursor:pointer;">${icon("upload", 13)} Enviar PNG (sem fundo)<input type="file" accept="image/png" id="cfg-assinatura-file" style="display:none;"></label>
               ${draft.assinaturaImagemDataUrl ? `<button class="btn btn-sm" id="cfg-assinatura-remove">${icon("x", 12)} Remover</button>` : ""}

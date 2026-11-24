@@ -17,9 +17,18 @@ create table if not exists secex_data (
 
 alter table secex_data enable row level security;
 
+-- Visitantes sem login (papel "anon") não têm NENHUM acesso à tabela —
+-- nem mesmo se uma política for criada por engano no futuro.
+revoke all on table secex_data from anon;
+grant select, insert, update, delete on table secex_data to authenticated;
+
 -- Cada usuário só pode ler/inserir/atualizar/excluir a própria linha.
+-- (Se você já rodou a versão anterior deste arquivo, a linha abaixo
+-- substitui a política antiga sem erro.)
+drop policy if exists "Usuarios acessam somente os proprios dados" on secex_data;
 create policy "Usuarios acessam somente os proprios dados"
   on secex_data
   for all
-  using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
+  to authenticated
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
