@@ -26,7 +26,7 @@
     }[c]));
   }
   /* Só aceita imagens embutidas (data URL base64) em formatos raster
-     comuns. Os dados de logo/assinatura vêm do banco e são inseridos em
+     comuns. Os dados do logo vêm do banco e são inseridos em
      atributos src/style: sem esta checagem, um valor adulterado (ex.:
      com aspas ou "javascript:") poderia injetar HTML/JS na página. */
   const SAFE_IMG_DATA_URL = /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+\/]+=*$/i;
@@ -259,29 +259,6 @@
     if (t.includes("jpeg") || t.includes("jpg")) return "JPEG";
     if (t.includes("webp")) return "WEBP";
     return "PNG";
-  }
-
-  /* Gera uma imagem PNG (fundo transparente) com o nome do secretário
-     executivo escrito em estilo "letra de mão", para usar como
-     assinatura nas etiquetas quando não há uma imagem enviada. Usar
-     uma imagem (em vez de uma fonte customizada) faz a mesma assinatura
-     funcionar tanto na etiqueta impressa (HTML) quanto na baixada em PDF. */
-  async function gerarAssinaturaImagem(nome){
-    if (!nome || !nome.trim()) return "";
-    try{
-      await document.fonts.load('700 64px "Dancing Script"');
-      await document.fonts.ready;
-    }catch(e){ /* segue mesmo se a fonte não carregar a tempo */ }
-    const canvas = document.createElement("canvas");
-    canvas.width = 640; canvas.height = 180;
-    const ctx = canvas.getContext("2d");
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.font = '700 68px "Dancing Script", cursive';
-    ctx.fillStyle = "#1E2A3E";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(nome.trim(), canvas.width / 2, canvas.height / 2 + 6);
-    return canvas.toDataURL("image/png");
   }
 
   /* Sentença oficial da etiqueta, dividida em trechos normais e em
@@ -585,21 +562,13 @@
     /* rodapé: nome do secretário + "Secretário Executivo", na posição do modelo */
     const rodTopo = y + ETQ.rodapeTopo;
     const passoRod = 7.5 * PT * 1.21;
-    let limiteCorpo = rodTopo - 0.6;
+    /* espaço em branco acima do nome para a assinatura à mão */
+    const limiteCorpo = rodTopo - 8;
     if (cfg.secretarioNome){
       usar(false); doc.setFontSize(7.5);
       doc.text(cfg.secretarioNome, cx, rodTopo + passoRod * 0.78, { align: "center" });
       usar(true);
       doc.text(cfg.secretarioCargo || "Secretário Executivo", cx, rodTopo + passoRod * 1.78, { align: "center" });
-      const ass = safeImg(cfg.assinaturaImagemDataUrl);
-      if (ass){
-        try{
-          const t = encaixarImagem(doc, ass, 26, 7.2);
-          const yImg = rodTopo - t.h + 2.0; // a imagem tem margem transparente; encosta no nome
-          doc.addImage(ass, logoImageFormat(ass), cx - t.w / 2, yImg, t.w, t.h);
-          limiteCorpo = yImg + t.h * 0.2;
-        }catch(e){}
-      }
     }
 
     /* 1–5. nome, texto oficial, registros e comissões — tamanhos do
@@ -781,7 +750,7 @@
     comissoesEspeciais: [],
     delegadosSupremo: [],
     delegadosSinodo: [],
-    config: { nomePresbiterio: "Secretaria executiva", sigla: "SE", logoDataUrl: "", infoAdicional: "", secretarioNome: "", secretarioCargo: "Secretário Executivo", nomeSinodo: "", siglaSinodo: "", assinaturaTipo: "imagem", assinaturaImagemDataUrl: "" },
+    config: { nomePresbiterio: "Secretaria executiva", sigla: "SE", logoDataUrl: "", infoAdicional: "", secretarioNome: "", secretarioCargo: "Secretário Executivo", nomeSinodo: "", siglaSinodo: "" },
   };
 
   const STATE = {};
@@ -3296,8 +3265,14 @@
 
     function cfg(){ return STATE.config || DEFAULTS.config; }
 
+    /* A assinatura em imagem saiu das etiquetas (o secretário assina à
+       mão); ao salvar, descarta o que tiver ficado gravado dela. */
+    function semAssinaturaAntiga(c){
+      const { assinaturaImagemDataUrl, assinaturaTipo, ...resto } = c || {};
+      return resto;
+    }
     function salvarConfig(){
-      setSlice("config", { ...cfg(), ...draft });
+      setSlice("config", { ...semAssinaturaAntiga(cfg()), ...draft });
     }
 
     function onLogoFile(file){
@@ -3306,13 +3281,13 @@
       reader.onload = async () => {
         if (!safeImg(reader.result)){ await alertModal("Envie uma imagem PNG, JPG, GIF ou WEBP."); return; }
         draft.logoDataUrl = reader.result;
-        setSlice("config", { ...cfg(), ...draft });
+        setSlice("config", { ...semAssinaturaAntiga(cfg()), ...draft });
       };
       reader.readAsDataURL(file);
     }
     function removerLogo(){
       draft.logoDataUrl = "";
-      setSlice("config", { ...cfg(), ...draft });
+      setSlice("config", { ...semAssinaturaAntiga(cfg()), ...draft });
     }
 
     /* Fonte própria da etiqueta (ex.: ZapfHumnst BT, do modelo do Word).
@@ -3335,7 +3310,7 @@
       catch(e){ await alertModal("Não foi possível enviar o arquivo da fonte agora. Tente novamente."); return; }
       if (antigo) apagarArquivosAnexos([antigo]);
       const fonteEtiqueta = { ...atual, [estilo]: { id: uid(), nome: file.name, tamanho: file.size, ...guardado } };
-      await setSlice("config", { ...cfg(), ...draft, fonteEtiqueta });
+      await setSlice("config", { ...semAssinaturaAntiga(cfg()), ...draft, fonteEtiqueta });
     }
     async function removerFonteEtiqueta(){
       const atual = cfg().fonteEtiqueta;
@@ -3346,33 +3321,9 @@
       await setSlice("config", { ...resto, ...draft });
     }
 
-    function onAssinaturaFile(file){
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = async () => {
-        if (!safeImg(reader.result)){ await alertModal("Envie uma imagem PNG para a assinatura."); return; }
-        draft.assinaturaImagemDataUrl = reader.result;
-        draft.assinaturaTipo = "imagem";
-        setSlice("config", { ...cfg(), ...draft });
-      };
-      reader.readAsDataURL(file);
-    }
-    function removerAssinatura(){
-      draft.assinaturaImagemDataUrl = "";
-      setSlice("config", { ...cfg(), ...draft });
-    }
-    async function gerarAssinaturaAutomatica(){
-      const nome = (draft.secretarioNome || "").trim();
-      if (!nome){ await alertModal("Informe o nome de quem assina, logo acima, antes de gerar a assinatura."); return; }
-      const dataUrl = await gerarAssinaturaImagem(nome);
-      draft.assinaturaImagemDataUrl = dataUrl;
-      draft.assinaturaTipo = "gerada";
-      await setSlice("config", { ...cfg(), ...draft });
-    }
-
     function renderGeral(container){
       const c = cfg();
-      if (!draft) draft = { nomePresbiterio: c.nomePresbiterio, sigla: c.sigla, infoAdicional: c.infoAdicional, logoDataUrl: c.logoDataUrl, secretarioNome: c.secretarioNome || "", secretarioCargo: c.secretarioCargo || "Secretário Executivo", nomeSinodo: c.nomeSinodo || "", siglaSinodo: c.siglaSinodo || "", assinaturaTipo: c.assinaturaTipo || "imagem", assinaturaImagemDataUrl: c.assinaturaImagemDataUrl || "" };
+      if (!draft) draft = { nomePresbiterio: c.nomePresbiterio, sigla: c.sigla, infoAdicional: c.infoAdicional, logoDataUrl: c.logoDataUrl, secretarioNome: c.secretarioNome || "", secretarioCargo: c.secretarioCargo || "Secretário Executivo", nomeSinodo: c.nomeSinodo || "", siglaSinodo: c.siglaSinodo || "" };
 
       container.innerHTML = `
         <p class="section-sub" style="margin:-4px 0 14px;">Identidade do presbitério usada no cabeçalho, nas impressões e na marca d'água das etiquetas de presença.</p>
@@ -3410,31 +3361,6 @@
             <label class="field-label">Cargo</label>
             <input id="cfg-secretario-cargo" value="${esc(draft.secretarioCargo)}" placeholder="Secretário Executivo">
           </div>
-        </div>
-
-        <div style="margin-top:14px;">
-          <label class="field-label">Assinatura do secretário executivo (aparece nas etiquetas de presença)</label>
-          <div style="display:flex; gap:6px; margin-bottom:10px;">
-            <button type="button" class="btn btn-sm ${draft.assinaturaTipo!=="gerada"?"btn-primary":""}" id="assinatura-modo-imagem">${icon("upload", 13)} Enviar imagem (PNG)</button>
-            <button type="button" class="btn btn-sm ${draft.assinaturaTipo==="gerada"?"btn-primary":""}" id="assinatura-modo-gerada">${icon("pencil", 13)} Gerar a partir do nome</button>
-          </div>
-          ${draft.assinaturaTipo === "gerada" ? `
-            <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-              <div style="border:1px solid var(--line); border-radius:6px; background:#fff; padding:6px 16px; min-height:56px; display:flex; align-items:center;">
-                ${safeImg(draft.assinaturaImagemDataUrl) ? `<img src="${safeImg(draft.assinaturaImagemDataUrl)}" alt="Assinatura gerada" style="height:48px;">` : `<span style="color:var(--muted); font-size:12px;">Nenhuma assinatura gerada ainda.</span>`}
-              </div>
-              <button class="btn btn-sm" id="assinatura-gerar">${icon("check", 13)} Gerar/atualizar assinatura</button>
-              ${draft.assinaturaImagemDataUrl ? `<button class="btn btn-sm" id="cfg-assinatura-remove">${icon("x", 12)} Remover</button>` : ""}
-            </div>
-          ` : `
-            <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-              <div style="border:1px solid var(--line); border-radius:6px; background:#fff; padding:6px 16px; min-height:56px; display:flex; align-items:center;">
-                ${safeImg(draft.assinaturaImagemDataUrl) ? `<img src="${safeImg(draft.assinaturaImagemDataUrl)}" alt="Assinatura enviada" style="height:48px;">` : `<span style="color:var(--muted); font-size:12px;">Nenhuma imagem enviada ainda.</span>`}
-              </div>
-              <label class="btn btn-sm" style="cursor:pointer;">${icon("upload", 13)} Enviar PNG (sem fundo)<input type="file" accept="image/png" id="cfg-assinatura-file" style="display:none;"></label>
-              ${draft.assinaturaImagemDataUrl ? `<button class="btn btn-sm" id="cfg-assinatura-remove">${icon("x", 12)} Remover</button>` : ""}
-            </div>
-          `}
         </div>
 
         <div style="margin-top:14px;">
@@ -3480,17 +3406,9 @@
       container.querySelector("#cfg-logo-file").addEventListener("change", e => onLogoFile(e.target.files[0]));
       const removeBtn = container.querySelector("#cfg-logo-remove");
       if (removeBtn) removeBtn.addEventListener("click", removerLogo);
-      container.querySelector("#assinatura-modo-imagem").addEventListener("click", () => { draft.assinaturaTipo = "imagem"; renderActiveTab(); });
-      container.querySelector("#assinatura-modo-gerada").addEventListener("click", () => { draft.assinaturaTipo = "gerada"; renderActiveTab(); });
-      const assinaturaFile = container.querySelector("#cfg-assinatura-file");
-      if (assinaturaFile) assinaturaFile.addEventListener("change", e => onAssinaturaFile(e.target.files[0]));
-      const assinaturaRemove = container.querySelector("#cfg-assinatura-remove");
-      if (assinaturaRemove) assinaturaRemove.addEventListener("click", removerAssinatura);
       container.querySelectorAll("[data-fonte-etiqueta]").forEach(el => el.addEventListener("change", e => onFonteEtiquetaFile(el.getAttribute("data-fonte-etiqueta"), e.target.files[0])));
       const fonteRemove = container.querySelector("#cfg-fonte-remove");
       if (fonteRemove) fonteRemove.addEventListener("click", removerFonteEtiqueta);
-      const assinaturaGerar = container.querySelector("#assinatura-gerar");
-      if (assinaturaGerar) assinaturaGerar.addEventListener("click", gerarAssinaturaAutomatica);
       container.querySelector("#cfg-salvar").addEventListener("click", salvarConfig);
     }
 
