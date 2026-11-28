@@ -1105,12 +1105,14 @@
     return 1;
   }
   /* "ano" aqui é sempre o ANO DA ELEIÇÃO — o mandato começa no ano
-     seguinte (ex.: eleito em 2025, cumpre o mandato a partir de 2026). */
+     seguinte (ex.: eleito em 2025, cumpre o mandato a partir de 2026).
+     Um mandato de N anos cobre N anos-calendário: biênio eleito em 2025
+     = 2026–2027; quadriênio = 2026–2029; 3 anos = 2026–2028. */
   function mandatoAnoTexto(anoEleicao, anos){
     const anoEl = Number(anoEleicao) || null;
     if (!anoEl) return "";
     const anoIni = anoEl + 1;
-    return anos > 1 ? `${anoIni}–${anoIni + anos}` : `${anoIni}`;
+    return anos > 1 ? `${anoIni}–${anoIni + anos - 1}` : `${anoIni}`;
   }
 
   /* ============================================================
@@ -2226,7 +2228,8 @@
       } else {
         registro.condicao = draft.condicao || "titular";
         const chave = tipo === "supremo" ? "delegadosSupremo" : "delegadosSinodo";
-        setSlice(chave, [...(STATE[chave] || []), { id: uid(), nome, ano, condicao: registro.condicao }]);
+        const categoria = (STATE.pastores || []).some(p => p.nome === nome) ? "pastor" : "presbitero";
+        setSlice(chave, [...(STATE[chave] || []), { id: uid(), nome, ano, condicao: registro.condicao, categoria }]);
       }
       eleicaoDraft[reuniaoId] = { tipo, cargo: draft.cargo, condicao: draft.condicao, vaga: draft.vaga, ano, nome: "" };
       save(reunioes().map(r => r.id === reuniaoId ? { ...r, eleicoes: [registro, ...(r.eleicoes || [])] } : r));
@@ -3523,6 +3526,122 @@
       container.querySelectorAll("[data-remove-fiscal]").forEach(el => el.addEventListener("click", () => removeFiscal(el.getAttribute("data-remove-fiscal"))));
     }
 
+    /* -- delegados ao Sínodo (biênio) e ao Supremo Concílio (quadriênio):
+       titulares e suplentes, pastores e presbíteros, na ordem definida
+       pelo presbitério. A ordem é a posição na lista; uma vaga em aberto
+       fica registrada como "VAGO". Registros antigos (vindos da aba
+       Eleição) sem categoria são classificados pelo cadastro de pastores. -- */
+    const formDelegado = {};
+    function categoriaDelegado(d){
+      if (d.categoria === "pastor" || d.categoria === "presbitero") return d.categoria;
+      return (STATE.pastores || []).some(p => p.nome === d.nome) ? "pastor" : "presbitero";
+    }
+    const BLOCOS_DELEGADOS = [
+      { condicao: "titular", categoria: "pastor", titulo: "Titulares — Pastores" },
+      { condicao: "titular", categoria: "presbitero", titulo: "Titulares — Presbíteros" },
+      { condicao: "suplente", categoria: "pastor", titulo: "Suplentes — Pastores" },
+      { condicao: "suplente", categoria: "presbitero", titulo: "Suplentes — Presbíteros" },
+    ];
+    const noBloco = (d, b) => (d.condicao || "titular") === b.condicao && categoriaDelegado(d) === b.categoria;
+    function addDelegado(chave){
+      const f = formDelegado[chave];
+      const nome = (f.nome || "").trim();
+      if (!f.vago && !nome) return;
+      const novo = { id: uid(), nome: f.vago ? "" : nome, ano: f.ano, condicao: f.condicao, categoria: f.categoria };
+      if (f.vago) novo.vago = true;
+      setSlice(chave, [...(STATE[chave] || []), novo]);
+      formDelegado[chave] = { ...f, nome: "", vago: false };
+      renderActiveTab();
+    }
+    async function removeDelegado(chave, id){
+      if (await confirmModal("Remover este delegado da lista?")) setSlice(chave, (STATE[chave] || []).filter(d => d.id !== id));
+    }
+    /* Troca de lugar com o vizinho do mesmo bloco (titular/suplente ×
+       pastor/presbítero), mantendo a posição dos demais na lista. */
+    function moverDelegado(chave, id, direcao){
+      const lista = [...(STATE[chave] || [])];
+      const i = lista.findIndex(d => d.id === id);
+      if (i < 0) return;
+      const bloco = BLOCOS_DELEGADOS.find(b => noBloco(lista[i], b));
+      const posicoes = lista.map((d, k) => noBloco(d, bloco) ? k : -1).filter(k => k >= 0);
+      const j = posicoes[posicoes.indexOf(i) + direcao];
+      if (j === undefined) return;
+      [lista[i], lista[j]] = [lista[j], lista[i]];
+      setSlice(chave, lista);
+    }
+    function renderDelegados(container, chave, rotulo, anosMandato, nomeMandato){
+      const f = formDelegado[chave] || (formDelegado[chave] = { condicao: "titular", categoria: "pastor", nome: "", vago: false, ano: String(new Date().getFullYear()) });
+      const lista = STATE[chave] || [];
+      const sugestoes = f.categoria === "pastor"
+        ? (STATE.pastores || []).map(p => p.nome).filter(Boolean)
+        : membrosEfetivosGlobais().filter(nm => !(STATE.pastores || []).some(p => p.nome === nm));
+      const blocoHtml = b => {
+        const itens = lista.filter(d => noBloco(d, b));
+        return `
+        <div style="margin-bottom:14px;">
+          <p class="field-label" style="margin-bottom:6px;">${esc(b.titulo)} (${itens.length})</p>
+          ${itens.length === 0 ? '<p class="empty-note" style="margin:0;">Nenhum cadastrado.</p>' : `
+          <div class="list-col">
+            ${itens.map((d, k) => {
+              const mandato = mandatoAnoTexto(d.ano, anosMandato);
+              return `
+              <div class="row-card">
+                <span style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                  <span style="font-family:var(--mono); font-size:12px; color:var(--muted); min-width:22px;">${k + 1}º</span>
+                  ${d.vago ? '<b style="font-style:italic; color:var(--muted);">VAGO</b>' : `<b>${esc(d.nome)}</b>`}
+                  ${mandato ? `<span style="color:var(--muted); font-size:11.5px;">${esc(nomeMandato)} ${esc(mandato)}</span>` : ""}
+                </span>
+                <span style="display:flex; gap:2px; flex-shrink:0;">
+                  <button class="btn-icon" data-deleg-mover="${d.id}:-1" title="Subir" ${k === 0 ? "disabled" : ""}>${icon("chevronDown", 14).replace("<svg", '<svg style="transform:rotate(180deg)"')}</button>
+                  <button class="btn-icon" data-deleg-mover="${d.id}:1" title="Descer" ${k === itens.length - 1 ? "disabled" : ""}>${icon("chevronDown", 14)}</button>
+                  <button class="btn-icon" data-deleg-remove="${d.id}" title="Remover">${icon("trash", 15)}</button>
+                </span>
+              </div>`;
+            }).join("")}
+          </div>`}
+        </div>`;
+      };
+      container.innerHTML = `
+        <p class="section-sub" style="margin:-4px 0 14px;">Representantes do presbitério ${esc(rotulo)}, na ordem definida pelo presbitério. O ano é o da eleição; o ${esc(nomeMandato.toLowerCase())} começa no ano seguinte. Use "Vaga em aberto" para registrar um lugar ainda não preenchido.</p>
+        <div style="display:grid; grid-template-columns:110px 120px 1.6fr auto 90px auto; gap:8px; margin-bottom:16px; align-items:center;">
+          <select id="dl-condicao">
+            <option value="titular" ${f.condicao==="titular"?"selected":""}>Titular</option>
+            <option value="suplente" ${f.condicao==="suplente"?"selected":""}>Suplente</option>
+          </select>
+          <select id="dl-categoria">
+            <option value="pastor" ${f.categoria==="pastor"?"selected":""}>Pastor</option>
+            <option value="presbitero" ${f.categoria==="presbitero"?"selected":""}>Presbítero</option>
+          </select>
+          <span>
+            <input id="dl-nome" list="dl-sugestoes" placeholder="Nome — digite ou busque" value="${esc(f.nome)}" ${f.vago ? "disabled" : ""}>
+            <datalist id="dl-sugestoes">${sugestoes.map(nm => `<option value="${esc(nm)}">`).join("")}</datalist>
+          </span>
+          <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; white-space:nowrap;"><input type="checkbox" id="dl-vago" ${f.vago ? "checked" : ""}> Vaga em aberto</label>
+          <input type="number" id="dl-ano" title="Ano da eleição — o mandato começa no ano seguinte" value="${esc(f.ano)}">
+          <button class="btn btn-primary" id="dl-add">${icon("plus", 14)} Adicionar</button>
+        </div>
+        ${BLOCOS_DELEGADOS.map(blocoHtml).join("")}
+      `;
+      container.querySelector("#dl-condicao").addEventListener("change", e => { f.condicao = e.target.value; });
+      container.querySelector("#dl-categoria").addEventListener("change", e => { f.categoria = e.target.value; renderActiveTab(); });
+      container.querySelector("#dl-nome").addEventListener("input", e => { f.nome = e.target.value; });
+      container.querySelector("#dl-vago").addEventListener("change", e => { f.vago = e.target.checked; renderActiveTab(); });
+      container.querySelector("#dl-ano").addEventListener("input", e => { f.ano = e.target.value; });
+      container.querySelector("#dl-add").addEventListener("click", () => addDelegado(chave));
+      container.querySelectorAll("[data-deleg-mover]").forEach(el => el.addEventListener("click", () => {
+        const [id, dir] = el.getAttribute("data-deleg-mover").split(":");
+        moverDelegado(chave, id, Number(dir));
+      }));
+      container.querySelectorAll("[data-deleg-remove]").forEach(el => el.addEventListener("click", () => removeDelegado(chave, el.getAttribute("data-deleg-remove"))));
+    }
+    function renderDelegadosSinodo(container){
+      const c = cfg();
+      renderDelegados(container, "delegadosSinodo", `ao ${c.nomeSinodo || c.siglaSinodo || "Sínodo"}`, 2, "Biênio");
+    }
+    function renderDelegadosSupremo(container){
+      renderDelegados(container, "delegadosSupremo", "ao Supremo Concílio", 4, "Quadriênio");
+    }
+
     /* -- comitê gestor: sempre o presidente e o tesoureiro atuais da
        Comissão Executiva (derivados automaticamente, nunca digitados
        aqui) + 2 membros extras escolhidos entre os membros efetivos -- */
@@ -3803,6 +3922,8 @@
       { grupo: "Órgãos", id: "executiva", label: "Comissão executiva", icon: "user", render: renderExecutiva },
       { grupo: "Órgãos", id: "fiscal", label: "Conselho fiscal", icon: "shield", render: renderFiscal },
       { grupo: "Órgãos", id: "gestor", label: "Comitê gestor", icon: "target", render: renderGestor },
+      { grupo: "Órgãos", id: "sinodo", label: "Delegados ao Sínodo", icon: "users", render: renderDelegadosSinodo },
+      { grupo: "Órgãos", id: "supremo", label: "Delegados ao Supremo", icon: "users", render: renderDelegadosSupremo },
       { grupo: "Comissões e secretarias", id: "secretarias", label: "Secretarias de causas", icon: "clipboard", render: renderSecretarias },
       { grupo: "Comissões e secretarias", id: "permanentes", label: "Comissões permanentes", icon: "layers", render: renderPermanentes },
       { grupo: "Comissões e secretarias", id: "temporarias", label: "Comissões temporárias", icon: "layers", render: renderTemporarias },
