@@ -26,7 +26,7 @@
     }[c]));
   }
   /* Só aceita imagens embutidas (data URL base64) em formatos raster
-     comuns. Os dados de logo/assinatura vêm do banco e são inseridos em
+     comuns. Os dados do logo vêm do banco e são inseridos em
      atributos src/style: sem esta checagem, um valor adulterado (ex.:
      com aspas ou "javascript:") poderia injetar HTML/JS na página. */
   const SAFE_IMG_DATA_URL = /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+\/]+=*$/i;
@@ -190,10 +190,20 @@
     _modalObjectUrl = URL.createObjectURL(new Blob([blob], { type: "application/pdf" }));
     montarVisualizador(root, anexo, `<iframe class="modal-pdf-frame" src="${_modalObjectUrl}" title="${esc(anexo.nome)}"></iframe>`);
   }
+  /* Mostra um PDF gerado pelo sistema (ex.: etiquetas) no mesmo
+     visualizador dos anexos, com uma dica opcional acima. */
+  function abrirPdfNoVisualizador(blob, titulo, dica){
+    const root = document.getElementById("modal-root");
+    if (!root) return;
+    fecharModal();
+    _modalObjectUrl = URL.createObjectURL(new Blob([blob], { type: "application/pdf" }));
+    montarVisualizador(root, { nome: titulo },
+      `${dica ? `<div class="modal-hint">${icon("printer", 13)} ${esc(dica)}</div>` : ""}<iframe class="modal-pdf-frame" src="${_modalObjectUrl}" title="${esc(titulo)}"></iframe>`);
+  }
   function montarVisualizador(root, anexo, corpo){
     root.innerHTML = `
       <div class="modal-backdrop" id="modal-backdrop">
-        <div class="modal-box" id="modal-box">
+        <div class="modal-box modal-box-lg" id="modal-box">
           <div class="modal-head">
             <b>${esc(anexo.nome)}</b>
             <button class="btn-icon" id="modal-close" title="Fechar">${icon("x", 17)}</button>
@@ -251,48 +261,34 @@
     return "PNG";
   }
 
-  /* Gera uma imagem PNG (fundo transparente) com o nome do secretário
-     executivo escrito em estilo "letra de mão", para usar como
-     assinatura nas etiquetas quando não há uma imagem enviada. Usar
-     uma imagem (em vez de uma fonte customizada) faz a mesma assinatura
-     funcionar tanto na etiqueta impressa (HTML) quanto na baixada em PDF. */
-  async function gerarAssinaturaImagem(nome){
-    if (!nome || !nome.trim()) return "";
-    try{
-      await document.fonts.load('700 64px "Dancing Script"');
-      await document.fonts.ready;
-    }catch(e){ /* segue mesmo se a fonte não carregar a tempo */ }
-    const canvas = document.createElement("canvas");
-    canvas.width = 640; canvas.height = 180;
-    const ctx = canvas.getContext("2d");
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.font = '700 68px "Dancing Script", cursive';
-    ctx.fillStyle = "#1E2A3E";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(nome.trim(), canvas.width / 2, canvas.height / 2 + 6);
-    return canvas.toDataURL("image/png");
-  }
-
-  /* Sentença oficial da etiqueta, dividida em trechos (para negritar
-     "Compareceu", a data, o local e o tipo de membro) — usada tanto na
-     versão impressa (HTML) quanto na versão em PDF para download. */
+  /* Sentença oficial da etiqueta, dividida em trechos normais e em
+     negrito exatamente como no modelo do Word: "Compareceu à **I Reunião
+     Extraordinária** do **Presbitério de São Paulo**, realizada no dia
+     **26 de abril de 2025**, na **Companhia de Estágios**, como **membro
+     efetivo**, conforme **art. 66, alínea “a”** da **CI/IPB**." */
   function montarSegmentosEtiqueta(r, gi){
     const cfg = STATE.config || {};
     const tipoReuniao = r.tipo && r.tipo.trim() ? r.tipo.trim() : "reunião";
     const presbiterio = cfg.nomePresbiterio || "presbitério";
     const segs = [
-      { text: "Compareceu", bold: true },
-      { text: ` à ${tipoReuniao}, do ${presbiterio}, realizada no dia `, bold: false },
-      { text: fmtDate(r.data), bold: true },
+      { text: "Compareceu à ", bold: false },
+      { text: tipoReuniao, bold: true },
+      { text: ` do `, bold: false },
+      { text: presbiterio, bold: true },
+      { text: `, realizada ${diasDaReuniao(r).length > 1 ? "nos dias" : "no dia"} `, bold: false },
+      { text: fmtPeriodoExtenso(r) || fmtDate(r.data), bold: true },
     ];
     if (r.local && r.local.trim()){
-      segs.push({ text: " na ", bold: false });
+      segs.push({ text: ", na ", bold: false });
       segs.push({ text: r.local.trim(), bold: true });
     }
     segs.push({ text: ", como ", bold: false });
     segs.push({ text: gi.rotulo, bold: true });
-    segs.push({ text: `, conforme art. 66, alínea "${gi.alinea}" da CI/IPB.`, bold: false });
+    segs.push({ text: ", conforme ", bold: false });
+    segs.push({ text: `art. 66, alínea \u201C${gi.alinea}\u201D`, bold: true });
+    segs.push({ text: " da ", bold: false });
+    segs.push({ text: "CI/IPB", bold: true });
+    segs.push({ text: ".", bold: false });
     return segs;
   }
 
@@ -326,6 +322,8 @@
         if (e.tipo === "executiva") return `Eleito ${e.cargo} do ${cfg.sigla || cfg.nomePresbiterio || "presbitério"}${sufixoAno}`;
         if (e.tipo === "supremo") return `Eleito ${e.condicao || "delegado"} ao Supremo Concílio${sufixoAno}`;
         if (e.tipo === "sinodo") return `Eleito ${e.condicao || "delegado"} ao ${cfg.siglaSinodo || cfg.nomeSinodo || "Sínodo"}${sufixoAno}`;
+        if (e.tipo === "fiscal") return `Eleito membro ${e.condicao || "titular"} do Conselho Fiscal${sufixoAno}`;
+        if (e.tipo === "gestor") return `Eleito membro do Comitê Gestor${sufixoAno}`;
         return "";
       }).filter(Boolean);
   }
@@ -345,37 +343,87 @@
       });
   }
 
-  /* Todas as linhas de participação (comissões da reunião + eleições +
-     nomeações) de uma pessoa nesta reunião — usada tanto na etiqueta
-     impressa quanto na baixada em PDF. */
-  function participacoesLinhas(r, nomePessoa){
-    return [
-      ...participacoesComissoes(r, nomePessoa),
-      ...participacoesEleicoes(r, nomePessoa),
-      ...participacoesNomeacoes(r, nomePessoa),
-    ];
+  /* Designação de campo (só na Reunião Ordinária de dezembro, para o
+     ano seguinte). "local" é a igreja ou, conforme a designação, o
+     campo de atuação / agência / instituição. */
+  function textoDesignacao(d){
+    const ano = d.ano ? ` - ${d.ano}` : "";
+    const local = (d.local || "").trim();
+    if (d.designacao === "Pastor Evangelista") return `Designado Pastor Evangelista${local ? " em " + local : ""}${ano}`;
+    if (d.designacao === "Missionário") return `Designado Missionário${local ? " (" + local + ")" : ""}${ano}`;
+    if (d.designacao === "Cedido") return `Cedido${local ? " para " + local : ""}${ano}`;
+    return `Designado ${d.designacao || "Pastor Efetivo"}${local ? " da " + local : ""}${ano}`;
   }
+  function participacoesDesignacoes(r, nomePessoa){
+    if (!ehReuniaoDeDesignacoes(r)) return [];
+    return (r.designacoes || []).filter(d => d.nome === nomePessoa).map(textoDesignacao);
+  }
+  /* Registro livre (qualquer outra decisão), exatamente como digitado. */
+  function participacoesRegistros(r, nomePessoa){
+    return (r.registros || []).filter(x => x.nome === nomePessoa && (x.texto || "").trim()).map(x => x.texto.trim());
+  }
+
+  /* Registros da etiqueta no formato do modelo: as comissões da reunião
+     vão num bloco "Participou da Comissão:" (só o nome da comissão em
+     cada linha); o resto (designação, eleições, nomeações, registro
+     livre) vem antes, uma decisão por linha. */
+  function registrosEtiqueta(r, nomePessoa){
+    const comissoes = (r.comissoes || [])
+      .filter(c => (c.membros || []).includes(nomePessoa) || c.relator === nomePessoa || c.subrelator === nomePessoa)
+      .map(c => c.nome + (c.relator === nomePessoa ? " - relator" : c.subrelator === nomePessoa ? " - subrelator" : ""));
+    return {
+      outros: [
+        ...participacoesDesignacoes(r, nomePessoa),
+        ...participacoesEleicoes(r, nomePessoa),
+        ...participacoesNomeacoes(r, nomePessoa),
+        ...participacoesRegistros(r, nomePessoa),
+      ],
+      comissoes,
+    };
+  }
+
 
   /* Escreve um parágrafo com trechos em negrito e normal, quebrando
      linha manualmente e (opcionalmente) justificando — o jsPDF não
      resolve negrito misturado dentro de um único text(). Retorna a
      posição Y logo abaixo da última linha escrita. */
-  function drawJustifiedMixedText(doc, segments, x, y, maxWidth, fontSize, lineHeight, justify, measureOnly){
+  /* Largura real do texto como ele é desenhado. O getTextWidth do jsPDF
+     desconta o "kerning" de pares como "Te", mas o text() não aplica esse
+     ajuste — medindo letra por letra a medida bate com o desenho e as
+     palavras não encostam umas nas outras. */
+  function larguraTexto(doc, t){
+    let w = 0;
+    for (const ch of String(t)) w += doc.getTextWidth(ch);
+    return w;
+  }
+  function drawJustifiedMixedText(doc, segments, x, y, maxWidth, fontSize, lineHeight, justify, measureOnly, familia, estiloNegrito){
+    const fam = familia || "helvetica", negrito = estiloNegrito || "bold";
     doc.setFontSize(fontSize);
+    /* Cada "palavra" é uma lista de pedaços (negrito ou não). Um trecho
+       que começa sem espaço gruda na palavra anterior — assim a vírgula
+       depois de um nome em negrito não ganha um espaço antes dela. */
     const words = [];
+    let colar = false;
     segments.forEach(seg => {
-      String(seg.text).split(" ").forEach(w => { if (w.length) words.push({ text: w, bold: !!seg.bold }); });
+      const txt = String(seg.text);
+      const partes = txt.split(" ");
+      partes.forEach((w, k) => {
+        if (!w.length) return;
+        const run = { text: w, bold: !!seg.bold };
+        if (k === 0 && colar && words.length) words[words.length - 1].push(run);
+        else words.push([run]);
+      });
+      colar = txt.length > 0 && !txt.endsWith(" ");
     });
     function widthOf(w){
-      doc.setFont("helvetica", w.bold ? "bold" : "normal");
-      return doc.getTextWidth(w.text);
+      return w.reduce((soma, run) => { doc.setFont(fam, run.bold ? negrito : "normal"); return soma + larguraTexto(doc, run.text); }, 0);
     }
-    doc.setFont("helvetica", "normal");
+    doc.setFont(fam, "normal");
     const spaceWidth = doc.getTextWidth(" ");
     let line = [], lineWidth = 0, cursorY = y;
     function flushLine(isLast){
       if (line.length === 0) return;
-      const totalWordsWidth = line.reduce((s, w) => s + widthOf(w), 0);
+      const totalWordsWidth = line.reduce((soma, w) => soma + widthOf(w), 0);
       const gaps = line.length - 1;
       let gapWidth = spaceWidth;
       if (justify !== false && !isLast && gaps > 0){
@@ -383,11 +431,12 @@
       }
       let cx = x;
       line.forEach((w, i) => {
-        if (!measureOnly){
-          doc.setFont("helvetica", w.bold ? "bold" : "normal");
-          doc.text(w.text, cx, cursorY);
-        }
-        cx += widthOf(w) + (i < line.length - 1 ? gapWidth : 0);
+        w.forEach(run => {
+          doc.setFont(fam, run.bold ? negrito : "normal");
+          if (!measureOnly) doc.text(run.text, cx, cursorY);
+          cx += larguraTexto(doc, run.text);
+        });
+        if (i < line.length - 1) cx += gapWidth;
       });
       cursorY += lineHeight;
       line = []; lineWidth = 0;
@@ -409,120 +458,194 @@
     return cursorY;
   }
 
-  function gerarEtiquetasPDF(r){
-    if (!window.jspdf) return null;
-    const presentes = r.membros.filter(m => m.presenca === "Presente");
-    if (presentes.length === 0) return null;
-    const { jsPDF } = window.jspdf;
+  /* ============================================================
+     Etiquetas de presença — reprodução do modelo do Word
+     ("Etiquetas - Conciliares - Modelo Geral.docx"):
+     - A4 deitada, margens de 12,7 mm, 12 caixas de 63,55 × 53,11 mm
+       (4 por linha), alinhadas à esquerda como no Word;
+     - borda única verde #213315 de 4 pt, cantos retos (é a guia de corte);
+     - margem interna de 2,54 mm nas laterais e 1,27 mm em cima;
+     - logotipo, nome da pessoa (acréscimo), texto justificado de 7,5 pt,
+       registros, "Participou da Comissão:" (8,5 pt, negrito) e, no pé,
+       nome do secretário (7,5 pt) e "Secretário Executivo" (negrito).
+     Medidas tiradas do .docx; posições conferidas contra o PDF do modelo.
+     ============================================================ */
+  const ETQ = {
+    w: 63.55, h: 53.11, cols: 4, rows: 3,
+    x0: 13.21, y0: 13.20,           // canto da caixa (meio da linha da borda)
+    passoX: 68.62, passoY: 57.74,    // distância entre caixas, como no Word
+    borda: 1.41, verde: [33, 51, 21],
+    insetX: 2.54, insetY: 1.27,
+    logoW: 34.4, logoH: 9.86,
+    rodapeTopo: 42.27,               // topo da linha do nome do secretário (a partir do topo da caixa)
+  };
+  const PT = 0.3528; // mm por ponto
+
+  function encaixarImagem(doc, dataUrl, maxW, maxH){
+    let w = maxW, h = maxH;
+    try{
+      const p = doc.getImageProperties(dataUrl);
+      const escala = Math.min(maxW / p.width, maxH / p.height);
+      w = p.width * escala; h = p.height * escala;
+    }catch(e){}
+    return { w, h };
+  }
+
+  /* Quem recebe etiqueta: presente em pelo menos um dia da reunião.
+     Ordem da chamada: ministros, igrejas, depois os demais grupos. */
+  function presentesParaEtiqueta(r){
+    const ordem = id => { const i = GRUPOS_REUNIAO.findIndex(g => g.id === id); return i < 0 ? 99 : i; };
+    return (r.membros || [])
+      .filter(m => presencaGeral(m, r) === "Presente")
+      .map((m, i) => ({ m, i }))
+      .sort((a, b) => ordem(a.m.grupo) - ordem(b.m.grupo) || a.i - b.i)
+      .map(x => x.m);
+  }
+
+  /* Fonte própria da etiqueta (ex.: ZapfHumnst BT), enviada pelo usuário
+     em Configurações gerais. Fica no Storage da conta (ou no navegador,
+     no modo local) — nunca no repositório, que é público. */
+  async function blobParaBase64(blob){
+    const buf = new Uint8Array(await blob.arrayBuffer());
+    let s = "";
+    for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+    return btoa(s);
+  }
+  async function carregarFonteEtiqueta(doc){
+    const f = (STATE.config || {}).fonteEtiqueta;
+    if (!f || !f.normal) return { familia: "helvetica", temNegrito: true };
+    try{
+      const normal64 = await blobParaBase64(await obterArquivoAnexo(f.normal));
+      doc.addFileToVFS("etiqueta-normal.ttf", normal64);
+      doc.addFont("etiqueta-normal.ttf", "Etiqueta", "normal");
+      let temNegrito = false;
+      if (f.negrito){
+        const negrito64 = await blobParaBase64(await obterArquivoAnexo(f.negrito));
+        doc.addFileToVFS("etiqueta-negrito.ttf", negrito64);
+        doc.addFont("etiqueta-negrito.ttf", "Etiqueta", "bold");
+        temNegrito = true;
+      }
+      doc.setFont("Etiqueta", "normal"); doc.getTextWidth("teste"); // falha aqui se o arquivo for inválido
+      return { familia: "Etiqueta", temNegrito };
+    }catch(e){
+      console.warn("Fonte da etiqueta não pôde ser usada; seguindo com Helvetica", e);
+      return { familia: "helvetica", temNegrito: true, falhou: true };
+    }
+  }
+
+  function desenharEtiqueta(doc, r, m, x, y, fonte){
     const cfg = STATE.config || {};
-    const doc = new jsPDF({ unit: "mm", format: "a4" });
-    const pageW = 210, pageH = 297, margin = 8, cols = 4;
-    const cellW = (pageW - margin * 2) / cols, cellH = 66;
-    const rowsPerPage = Math.floor((pageH - margin * 2) / cellH);
-    const temAssinaturaImg = !!cfg.assinaturaImagemDataUrl;
-    const topOffset = 15;
-    /* Reserva um espaço fixo no rodapé da etiqueta para a assinatura,
-       maior quando há uma imagem de assinatura. O texto acima é
-       redimensionado (ver loop abaixo) para nunca invadir essa faixa. */
-    const footerReserve = temAssinaturaImg ? 19 : 12;
-    let col = 0, row = 0;
-    for (let idx = 0; idx < presentes.length; idx++){
-      const m = presentes[idx];
-      const x = margin + col * cellW, y = margin + row * cellH;
-      doc.setDrawColor(30, 42, 62);
-      doc.setLineWidth(0.3);
-      doc.rect(x, y, cellW, cellH);
-      if (cfg.logoDataUrl){
-        try{
-          const fmt = logoImageFormat(cfg.logoDataUrl);
-          const wm = cellW * 0.55;
-          let gsApplied = false;
-          try{ doc.saveGraphicsState(); doc.setGState(new doc.GState({ opacity: 0.14 })); gsApplied = true; }catch(e){}
-          doc.addImage(cfg.logoDataUrl, fmt, x + (cellW - wm) / 2, y + (cellH - wm) / 2, wm, wm);
-          if (gsApplied) doc.restoreGraphicsState();
-        }catch(e){ /* logo em formato não suportado pelo gerador de PDF — segue sem marca d'água */ }
-      }
-      doc.setTextColor(30, 42, 62);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(10.5);
-      doc.text(m.nome, x + cellW / 2, y + 8.4, { align: "center", maxWidth: cellW - 5 });
+    const W = ETQ.w, H = ETQ.h;
+    const fam = fonte.familia || "helvetica";
+    const estiloNegrito = fonte.temNegrito === false ? "normal" : "bold";
+    const usar = negrito => doc.setFont(fam, negrito ? estiloNegrito : "normal");
 
-      const gi = GRUPOS_REUNIAO.find(g => g.id === m.grupo) || { alinea: "a", rotulo: "membro efetivo" };
-      const segs = montarSegmentosEtiqueta(r, gi);
-      const participacoes = participacoesLinhas(r, m.nome);
+    /* caixa branca com borda verde de 4 pt */
+    doc.setDrawColor(...ETQ.verde); doc.setLineWidth(ETQ.borda);
+    doc.setFillColor(255, 255, 255);
+    doc.rect(x, y, W, H, "FD");
 
-      /* Ajuste dinâmico: começa com o texto grande e só reduz o
-         suficiente para que ele (comparecimento + participações) caiba
-         acima da faixa reservada para a assinatura. */
-      let fontSize = 8.8, lineHeight = 3.9, pFontSize = 8.0, pLineHeight = 3.5;
-      const limiteY = y + cellH - footerReserve;
-      function alturaComEstesTamanhos(fs, lh, pfs, plh){
-        let cy = drawJustifiedMixedText(doc, segs, x + 3, y + topOffset, cellW - 6, fs, lh, true, true);
-        if (participacoes.length){
-          cy += 1.3;
-          participacoes.forEach(linha => {
-            cy = drawJustifiedMixedText(doc, [{ text: linha, bold: false }], x + 3, cy, cellW - 6, pfs, plh, false, true);
-          });
-        }
-        return cy;
-      }
-      while (alturaComEstesTamanhos(fontSize, lineHeight, pFontSize, pLineHeight) > limiteY && fontSize > 5.6){
-        fontSize -= 0.2; lineHeight -= 0.09;
-        pFontSize -= 0.18; pLineHeight -= 0.08;
-      }
+    const left = x + ETQ.insetX, larg = W - 2 * ETQ.insetX, cx = x + W / 2;
+    let topo = y + ETQ.insetY;
+    doc.setTextColor(0, 0, 0);
 
-      let cursorY = drawJustifiedMixedText(doc, segs, x + 3, y + topOffset, cellW - 6, fontSize, lineHeight, true, false);
-      if (participacoes.length){
-        cursorY += 1.3;
-        participacoes.forEach(linha => {
-          cursorY = drawJustifiedMixedText(doc, [{ text: linha, bold: false }], x + 3, cursorY, cellW - 6, pFontSize, pLineHeight, false, false);
+    /* 0. logotipo centralizado */
+    const logo = safeImg(cfg.logoDataUrl);
+    if (logo){
+      try{
+        const t = encaixarImagem(doc, logo, ETQ.logoW, ETQ.logoH);
+        doc.addImage(logo, logoImageFormat(logo), cx - t.w / 2, topo + (ETQ.logoH - t.h) / 2, t.w, t.h);
+      }catch(e){}
+      topo += ETQ.logoH + 0.35;
+    }
+
+    /* rodapé: nome do secretário + "Secretário Executivo", na posição do modelo */
+    const rodTopo = y + ETQ.rodapeTopo;
+    const passoRod = 7.5 * PT * 1.21;
+    /* espaço em branco acima do nome para a assinatura à mão */
+    const limiteCorpo = rodTopo - 8;
+    if (cfg.secretarioNome){
+      usar(false); doc.setFontSize(7.5);
+      doc.text(cfg.secretarioNome, cx, rodTopo + passoRod * 0.78, { align: "center" });
+      usar(true);
+      doc.text(cfg.secretarioCargo || "Secretário Executivo", cx, rodTopo + passoRod * 1.78, { align: "center" });
+    }
+
+    /* 1–5. nome, texto oficial, registros e comissões — tamanhos do
+       modelo (nome 8,5 pt; texto 7,5 pt; título 8,5 pt), reduzidos juntos
+       só se não couberem acima do rodapé. */
+    const gi = GRUPOS_REUNIAO.find(g => g.id === m.grupo) || { alinea: "a", rotulo: "membro efetivo" };
+    const segs = montarSegmentosEtiqueta(r, gi);
+    const { outros, comissoes } = registrosEtiqueta(r, m.nome);
+    function bloco(escala, medir){
+      const fsNome = 8.5 * escala, fs = 7.5 * escala, fsTit = 8.5 * escala;
+      const passo = fs * PT * 1.21, passoTit = fsTit * PT * 1.21;
+      let t = topo;
+      /* nome da pessoa, negrito, centralizado (até 2 linhas) */
+      /* nome da pessoa, negrito, centralizado: diminui até caber numa
+         linha (mínimo ~6,8 pt); se ainda não couber, quebra em duas */
+      usar(true);
+      let fsN = fsNome;
+      doc.setFontSize(fsN);
+      while (larguraTexto(doc, m.nome) > larg && fsN > 6.8 * escala){ fsN -= 0.1; doc.setFontSize(fsN); }
+      const passoN = fsN * PT * 1.21;
+      const linhasNome = larguraTexto(doc, m.nome) > larg ? doc.splitTextToSize(m.nome, larg).slice(0, 2) : [m.nome];
+      linhasNome.forEach(l => { if (!medir) doc.text(l, cx, t + passoN * 0.78, { align: "center" }); t += passoN; });
+      t += 2 * PT; // parágrafo vazio de 2 pt do modelo
+      /* texto oficial justificado */
+      t = drawJustifiedMixedText(doc, segs, left, t + passo * 0.78, larg, fs, passo, true, medir, fam, estiloNegrito) - passo * 0.78;
+      if (outros.length || comissoes.length) t += 1 * PT; // parágrafo vazio de 1 pt
+      outros.forEach(linha => {
+        t = drawJustifiedMixedText(doc, [{ text: linha, bold: false }], left, t + passo * 0.78, larg, fs, passo, false, medir, fam, estiloNegrito) - passo * 0.78;
+      });
+      if (comissoes.length){
+        usar(true); doc.setFontSize(fsTit);
+        if (!medir) doc.text(comissoes.length > 1 ? "Participou das Comissões:" : "Participou da Comissão:", left, t + passoTit * 0.78);
+        t += passoTit;
+        comissoes.forEach(linha => {
+          t = drawJustifiedMixedText(doc, [{ text: linha, bold: false }], left, t + passo * 0.78, larg, fs, passo, false, medir, fam, estiloNegrito) - passo * 0.78;
         });
       }
-
-      if (cfg.secretarioNome){
-        let assinaturaBaixo = y + cellH - 7.0;
-        if (temAssinaturaImg){
-          try{
-            const fmt = logoImageFormat(cfg.assinaturaImagemDataUrl);
-            const imgW = Math.min(cellW * 0.46, 28);
-            const imgH = imgW * (180 / 640);
-            const imgY = y + cellH - footerReserve + 0.8;
-            /* Assinatura colada bem perto do nome — como se o secretário
-               tivesse assinado ali mesmo, sobre a linha do nome — vale
-               tanto para a imagem enviada quanto para a gerada pelo
-               sistema, já que as duas usam o mesmo campo (PNG sem fundo). */
-            doc.addImage(cfg.assinaturaImagemDataUrl, fmt, x + (cellW - imgW) / 2, imgY, imgW, imgH);
-            assinaturaBaixo = imgY + imgH + 1.0;
-          }catch(e){ /* imagem de assinatura em formato não suportado — segue só com o texto */ }
-        }
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(7);
-        doc.text(cfg.secretarioNome, x + cellW / 2, assinaturaBaixo, { align: "center" });
-        doc.setFont("helvetica", "bold");
-        doc.text(cfg.secretarioCargo || "Secretário Executivo", x + cellW / 2, assinaturaBaixo + 3.3, { align: "center" });
-      }
-      col++;
-      if (col >= cols){
-        col = 0;
-        row++;
-        if (row >= rowsPerPage && idx < presentes.length - 1){
-          doc.addPage();
-          row = 0;
-        }
-      }
+      return t;
     }
+    let escala = 1;
+    while (escala > 0.72 && bloco(escala, true) > limiteCorpo) escala -= 0.02;
+    doc.setTextColor(0, 0, 0);
+    bloco(escala, false);
+  }
+
+  async function gerarEtiquetasPDF(r){
+    if (!window.jspdf || !r) return null;
+    const presentes = presentesParaEtiqueta(r);
+    if (presentes.length === 0) return null;
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "landscape" });
+    const fonte = await carregarFonteEtiqueta(doc);
+    const porPagina = ETQ.cols * ETQ.rows;
+    presentes.forEach((m, idx) => {
+      const pos = idx % porPagina;
+      if (idx > 0 && pos === 0) doc.addPage("a4", "landscape");
+      const col = pos % ETQ.cols, lin = Math.floor(pos / ETQ.cols);
+      desenharEtiqueta(doc, r, m, ETQ.x0 + col * ETQ.passoX, ETQ.y0 + lin * ETQ.passoY, fonte);
+    });
+    doc.setProperties({ title: `Etiquetas de presença — ${fmtPeriodoCurto(r)}` });
+    if (fonte.falhou) showToast("A fonte da etiqueta não pôde ser usada; as etiquetas saíram em Helvetica.", "error");
     return doc;
+  }
+
+  function nomeArquivoEtiquetas(r){
+    const dias = diasDaReuniao(r);
+    return dias.length > 1 ? `etiquetas-${dias[0]}_a_${dias[dias.length - 1]}.pdf` : `etiquetas-${r.data}.pdf`;
   }
 
   async function baixarEtiquetas(r){
     if (!r) return;
-    const presentes = r.membros.filter(m => m.presenca === "Presente");
-    if (presentes.length === 0){ await alertModal("Ainda não há presentes registrados nesta reunião."); return; }
-    const pdfDoc = gerarEtiquetasPDF(r);
-    if (!pdfDoc){ await alertModal("Não foi possível gerar o PDF das etiquetas nesta pré-visualização. Use o botão de impressão como alternativa."); return; }
+    if (presentesParaEtiqueta(r).length === 0){ await alertModal("Ainda não há presentes registrados nesta reunião."); return; }
+    const pdfDoc = await gerarEtiquetasPDF(r);
+    if (!pdfDoc){ await alertModal("Não foi possível gerar o PDF das etiquetas agora."); return; }
     const blob = pdfDoc.output("blob");
     try{
-      await saveFile({ filename: `etiquetas-${r.data}.pdf`, data: blob });
+      await saveFile({ filename: nomeArquivoEtiquetas(r), data: blob });
     }catch(err){
       const code = err && err.code;
       if (code === "rejected_extension" || code === "extension_not_enabled"){
@@ -535,6 +658,17 @@
         await alertModal("Não foi possível baixar as etiquetas agora. Tente novamente.");
       }
     }
+  }
+
+  /* Imprimir = abrir o mesmo PDF no visualizador do sistema, de onde se
+     imprime com as medidas exatas (escolher "Tamanho real" / 100%). */
+  async function imprimirEtiquetas(r){
+    if (!r) return;
+    if (presentesParaEtiqueta(r).length === 0){ await alertModal("Ainda não há presentes registrados nesta reunião."); return; }
+    const pdfDoc = await gerarEtiquetasPDF(r);
+    if (!pdfDoc){ await alertModal("Não foi possível gerar as etiquetas agora."); return; }
+    abrirPdfNoVisualizador(pdfDoc.output("blob"), `Etiquetas — ${fmtPeriodoCurto(r)}`,
+      "Na impressão, escolha papel A4, orientação paisagem e escala \"Tamanho real\" (100%). Recorte pela borda verde.");
   }
 
   /* ============================================================
@@ -616,7 +750,7 @@
     comissoesEspeciais: [],
     delegadosSupremo: [],
     delegadosSinodo: [],
-    config: { nomePresbiterio: "Secretaria executiva", sigla: "SE", logoDataUrl: "", infoAdicional: "", secretarioNome: "", secretarioCargo: "Secretário Executivo", nomeSinodo: "", siglaSinodo: "", assinaturaTipo: "imagem", assinaturaImagemDataUrl: "" },
+    config: { nomePresbiterio: "Secretaria executiva", sigla: "SE", logoDataUrl: "", infoAdicional: "", secretarioNome: "", secretarioCargo: "Secretário Executivo", nomeSinodo: "", siglaSinodo: "" },
   };
 
   const STATE = {};
@@ -654,6 +788,7 @@
         dbSet("documentosSaida", STATE.documentosSaida);
       }
     }
+    migrarReunioesParaDias(); // só em memória; é gravado na próxima alteração
     STORE_READY = true;
   }
 
@@ -970,12 +1105,97 @@
     return 1;
   }
   /* "ano" aqui é sempre o ANO DA ELEIÇÃO — o mandato começa no ano
-     seguinte (ex.: eleito em 2025, cumpre o mandato a partir de 2026). */
+     seguinte (ex.: eleito em 2025, cumpre o mandato a partir de 2026).
+     Um mandato de N anos cobre N anos-calendário: biênio eleito em 2025
+     = 2026–2027; quadriênio = 2026–2029; 3 anos = 2026–2028. */
   function mandatoAnoTexto(anoEleicao, anos){
     const anoEl = Number(anoEleicao) || null;
     if (!anoEl) return "";
     const anoIni = anoEl + 1;
-    return anos > 1 ? `${anoIni}–${anoIni + anos}` : `${anoIni}`;
+    return anos > 1 ? `${anoIni}–${anoIni + anos - 1}` : `${anoIni}`;
+  }
+
+  /* ============================================================
+     Reuniões em mais de um dia
+     - r.data    = data de início (continua sendo usada para ordenar etc.)
+     - r.dataFim = data de término (opcional; vazio = reunião de um dia)
+     - m.presencas = { "AAAA-MM-DD": "Presente" | "Ausente" | "Justificado" }
+       (chamada por dia); m.presenca guarda o resumo de todos os dias.
+     ============================================================ */
+  const MESES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+  const DIAS_SEMANA = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+  function addDiasISO(iso, n){
+    const d = new Date(iso + "T00:00:00Z");
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  }
+  function diasDaReuniao(r){
+    if (!r || !/^\d{4}-\d{2}-\d{2}$/.test(r.data || "")) return [];
+    const fim = (r.dataFim && r.dataFim > r.data) ? r.dataFim : r.data;
+    const dias = [];
+    for (let d = r.data; d <= fim && dias.length < 31; d = addDiasISO(d, 1)) dias.push(d);
+    return dias;
+  }
+  function presencaNoDia(m, dia){ return (m.presencas && m.presencas[dia]) || "Ausente"; }
+  /* Presente se esteve em pelo menos um dia; senão Justificado se
+     justificou algum; senão Ausente. Só contam os dias da reunião. */
+  function presencaGeral(m, r){
+    const st = diasDaReuniao(r).map(d => presencaNoDia(m, d));
+    if (st.includes("Presente")) return "Presente";
+    if (st.includes("Justificado")) return "Justificado";
+    return "Ausente";
+  }
+  function partesData(iso){ const [a, mm, d] = iso.split("-").map(Number); return { a, m: mm, d }; }
+  function diaOrdinal(d){ return d === 1 ? "1º" : String(d); }
+  function fmtDiaSemana(iso){
+    const p = partesData(iso);
+    return `${DIAS_SEMANA[new Date(Date.UTC(p.a, p.m - 1, p.d)).getUTCDay()]} ${String(p.d).padStart(2, "0")}/${String(p.m).padStart(2, "0")}`;
+  }
+  /* Período por extenso, para a etiqueta: "26 de abril de 2025",
+     "25 e 26 de abril de 2025", "25 a 27 de abril de 2025",
+     "30 de abril e 1º de maio de 2025". */
+  function fmtPeriodoExtenso(r){
+    const dias = diasDaReuniao(r);
+    if (dias.length === 0) return "";
+    const i = partesData(dias[0]), f = partesData(dias[dias.length - 1]);
+    const ext = p => `${diaOrdinal(p.d)} de ${MESES[p.m - 1]}`;
+    if (dias.length === 1) return `${ext(i)} de ${i.a}`;
+    const lig = dias.length === 2 ? " e " : " a ";
+    if (i.a !== f.a) return `${ext(i)} de ${i.a}${lig}${ext(f)} de ${f.a}`;
+    if (i.m !== f.m) return `${ext(i)}${lig}${ext(f)} de ${f.a}`;
+    return `${diaOrdinal(i.d)}${lig}${ext(f)} de ${f.a}`;
+  }
+  /* Período curto, para listas e seletores: "26/04/2025",
+     "25 e 26/04/2025", "25 a 27/04/2025", "30/04 a 02/05/2025". */
+  function fmtPeriodoCurto(r){
+    const dias = diasDaReuniao(r);
+    if (dias.length <= 1) return fmtDate(r && r.data);
+    const i = partesData(dias[0]), f = partesData(dias[dias.length - 1]);
+    const dd = n => String(n).padStart(2, "0");
+    const lig = dias.length === 2 ? " e " : " a ";
+    if (i.a !== f.a) return `${fmtDate(dias[0])}${lig}${fmtDate(dias[dias.length - 1])}`;
+    if (i.m !== f.m) return `${dd(i.d)}/${dd(i.m)}${lig}${dd(f.d)}/${dd(f.m)}/${f.a}`;
+    return `${dd(i.d)}${lig}${dd(f.d)}/${dd(f.m)}/${f.a}`;
+  }
+  /* A designação de campo só é feita na Reunião Ordinária de dezembro
+     (vale para o ano seguinte). Detecta automaticamente pelo tipo e mês,
+     mas pode ser ligada/desligada à mão em cada reunião. */
+  function ehReuniaoDeDesignacoes(r){
+    if (!r) return false;
+    if (typeof r.ordinariaAnual === "boolean") return r.ordinariaAnual;
+    const tipo = r.tipo || "";
+    return /ordin[aá]ria/i.test(tipo) && !/extra/i.test(tipo) && /^\d{4}-12-/.test(r.data || "");
+  }
+  /* Reuniões gravadas antes da chamada por dia: a presença única vira a
+     presença do único dia. Retorna true se algo mudou. */
+  function migrarReunioesParaDias(){
+    let mudou = false;
+    STATE.reunioes = (STATE.reunioes || []).map(r => {
+      if (!(r.membros || []).some(m => !m.presencas)) return r;
+      mudou = true;
+      return { ...r, membros: r.membros.map(m => m.presencas ? m : { ...m, presencas: r.data ? { [r.data]: m.presenca || "Ausente" } : {} }) };
+    });
+    return mudou;
   }
 
   const TABS = {}; // preenchido abaixo, um bloco por aba
@@ -1113,7 +1333,7 @@
       const emAndamento = docs.filter(d => d.etapa !== "Arquivado" && d.etapa !== "Resposta emitida").length;
 
       const hoje = todayISO();
-      const futuras = reunioes.filter(r => r.data >= hoje).sort((a,b) => a.data.localeCompare(b.data));
+      const futuras = reunioes.filter(r => (r.dataFim || r.data) >= hoje).sort((a,b) => a.data.localeCompare(b.data));
       const proxima = futuras[0];
 
       const pendentes = tarefas.filter(t => t.status !== "Concluído");
@@ -1144,7 +1364,7 @@
               <div class="stat-sub">${atrasadas.length > 0 ? atrasadas.length + " em atraso" : "nenhuma em atraso"}</div>
             </div>
             <div class="stat-tile ${proxima ? "tone-gold" : ""}">
-              <div class="stat-num" style="font-size:18px;">${proxima ? fmtDate(proxima.data) : "—"}</div>
+              <div class="stat-num" style="font-size:18px;">${proxima ? esc(fmtPeriodoCurto(proxima)) : "—"}</div>
               <div class="stat-label">Próxima reunião</div>
               <div class="stat-sub">${proxima ? esc(proxima.local || "local a definir") : (reunioes.length ? "sem reuniões futuras agendadas" : "nenhuma reunião cadastrada")}</div>
             </div>
@@ -1550,7 +1770,7 @@
               </select>
               <select style="width:auto;" data-reuniao="${doc.id}">
                 <option value="">Vincular reunião...</option>
-                ${reunioes.map(r => `<option value="${r.id}" ${doc.reuniaoId === r.id ? "selected" : ""}>Reunião ${fmtDate(r.data)}</option>`).join("")}
+                ${reunioes.map(r => `<option value="${r.id}" ${doc.reuniaoId === r.id ? "selected" : ""}>Reunião ${esc(fmtPeriodoCurto(r))}</option>`).join("")}
               </select>
               ${doc.tipo !== "Saída" ? `
               <select style="width:auto;" data-comissao="${doc.id}">
@@ -1619,7 +1839,7 @@
       const r = (STATE.reunioes || []).find(x => x.id === reuniaoId);
       selecionados.forEach(id => {
         const doc = docs().find(d => d.id === id);
-        if (doc) logar(doc, `Encaminhado à reunião de ${r ? fmtDate(r.data) : "—"} (ação em massa)`, { reuniaoId });
+        if (doc) logar(doc, `Encaminhado à reunião de ${r ? fmtPeriodoCurto(r) : "—"} (ação em massa)`, { reuniaoId });
       });
       renderActiveTab();
     }
@@ -1723,7 +1943,7 @@
               <span style="display:flex; align-items:center; gap:5px;">
                 <select style="width:auto;" id="bulk-reuniao">
                   <option value="">Vincular reunião...</option>
-                  ${reunioes.map(r => `<option value="${r.id}" ${bulkReuniao===r.id?"selected":""}>Reunião ${fmtDate(r.data)}</option>`).join("")}
+                  ${reunioes.map(r => `<option value="${r.id}" ${bulkReuniao===r.id?"selected":""}>Reunião ${esc(fmtPeriodoCurto(r))}</option>`).join("")}
                 </select>
                 <button class="btn btn-sm" id="bulk-reuniao-aplicar" ${bulkReuniao?"":"disabled"}>Aplicar</button>
               </span>
@@ -1808,14 +2028,14 @@
           const doc = docs().find(d => d.id === el.getAttribute("data-etapa"));
           const etapa = e.target.value;
           let texto = `Etapa alterada para "${etapa}"`;
-          if (etapa === "Encaminhado à reunião" && doc.reuniaoId){ const r = reunioes.find(x=>x.id===doc.reuniaoId); if(r) texto += ` (reunião de ${fmtDate(r.data)})`; }
+          if (etapa === "Encaminhado à reunião" && doc.reuniaoId){ const r = reunioes.find(x=>x.id===doc.reuniaoId); if(r) texto += ` (reunião de ${fmtPeriodoCurto(r)})`; }
           if (etapa === "Em análise na comissão" && doc.comissaoId){ const c = comissoesTodas.find(x=>x.id===doc.comissaoId); if(c) texto += ` (${c.nome})`; }
           logar(doc, texto, { etapa });
         }));
         container.querySelectorAll("[data-reuniao]").forEach(el => el.addEventListener("change", e => {
           const doc = docs().find(d => d.id === el.getAttribute("data-reuniao"));
           const r = reunioes.find(x => x.id === e.target.value);
-          logar(doc, `Encaminhado à reunião de ${r ? fmtDate(r.data) : "—"}`, { reuniaoId: e.target.value });
+          logar(doc, `Encaminhado à reunião de ${r ? fmtPeriodoCurto(r) : "—"}`, { reuniaoId: e.target.value });
         }));
         container.querySelectorAll("[data-comissao]").forEach(el => el.addEventListener("change", e => {
           const doc = docs().find(d => d.id === el.getAttribute("data-comissao"));
@@ -1873,8 +2093,11 @@
 
   /* ---------- REUNIÕES ---------- */
   TABS.reunioes = (function(){
-    let novaData = "", novoLocal = "", novoTipo = "";
+    let novaData = "", novaDataFim = "", novoLocal = "", novoTipo = "";
     let ativa = null;
+    const diaSelecionado = {};   // reunião -> dia da chamada em edição
+    const designacaoDraft = {};
+    const registroDraft = {};
     const extraDraft = {};
     const comissaoNomeDraft = {};
     const comissaoMembroDraft = {};
@@ -1890,26 +2113,54 @@
       if (!novaData) return;
       const pastores = STATE.pastores || [], igrejas = STATE.igrejas || [];
       const membros = [
-        ...pastores.map(p => ({ id: uid(), nome: p.nome, grupo: "Ministros", presenca: "Ausente" })),
-        ...igrejas.map(i => ({ id: uid(), nome: (i.representante && i.representante.trim()) ? i.representante.trim() : i.nome, grupo: "Igrejas", presenca: "Ausente", igrejaId: i.id })),
+        ...pastores.map(p => ({ id: uid(), nome: p.nome, grupo: "Ministros", presenca: "Ausente", presencas: {} })),
+        ...igrejas.map(i => ({ id: uid(), nome: (i.representante && i.representante.trim()) ? i.representante.trim() : i.nome, grupo: "Igrejas", presenca: "Ausente", presencas: {}, igrejaId: i.id })),
       ];
-      const r = { id: uid(), data: novaData, local: novoLocal, tipo: novoTipo, membros, comissoes: [], eleicoes: [], nomeacoes: [] };
+      const dataFim = novaDataFim && novaDataFim > novaData ? novaDataFim : "";
+      const r = { id: uid(), data: novaData, dataFim, local: novoLocal, tipo: novoTipo, membros, comissoes: [], eleicoes: [], nomeacoes: [], designacoes: [], registros: [] };
       save([r, ...reunioes()]);
       ativa = r.id;
-      novaData = ""; novoLocal = ""; novoTipo = "";
+      novaData = ""; novaDataFim = ""; novoLocal = ""; novoTipo = "";
       renderActiveTab();
+    }
+    /* Dia da chamada sendo editado nesta reunião (o 1º, se nenhum). */
+    function diaAtual(r){
+      const dias = diasDaReuniao(r);
+      return dias.includes(diaSelecionado[r.id]) ? diaSelecionado[r.id] : dias[0];
+    }
+    /* Recalcula o resumo de presença de cada membro (usado nas
+       contagens, comissões e etiquetas). */
+    function comPresencaGeral(r){
+      return { ...r, membros: r.membros.map(m => ({ ...m, presenca: presencaGeral(m, r) })) };
+    }
+    async function setDatasReuniao(reuniaoId, campo, valor){
+      const r = getReuniao(reuniaoId);
+      if (!r) return;
+      let data = campo === "data" ? valor : r.data;
+      let dataFim = campo === "dataFim" ? valor : (r.dataFim || "");
+      if (!data){ await alertModal("A reunião precisa de uma data de início."); renderActiveTab(); return; }
+      if (dataFim && dataFim <= data) dataFim = "";
+      if (dataFim && diasDaReuniao({ data, dataFim }).length >= 31){ await alertModal("Uma reunião pode ter no máximo 30 dias."); renderActiveTab(); return; }
+      save(reunioes().map(x => x.id === reuniaoId ? comPresencaGeral({ ...x, data, dataFim }) : x));
+    }
+    function setOrdinariaAnual(reuniaoId, valor){
+      save(reunioes().map(r => r.id === reuniaoId ? { ...r, ordinariaAnual: !!valor } : r));
     }
     function addExtra(reuniaoId, grupo){
       const nome = (extraDraft[reuniaoId + grupo] || "").trim();
       if (!nome) return;
       extraDraft[reuniaoId + grupo] = "";
-      save(reunioes().map(r => r.id === reuniaoId ? { ...r, membros: [...r.membros, { id: uid(), nome, grupo, presenca: "Presente" }] } : r));
+      save(reunioes().map(r => r.id === reuniaoId ? comPresencaGeral({ ...r, membros: [...r.membros, { id: uid(), nome, grupo, presencas: { [diaAtual(r)]: "Presente" } }] }) : r));
     }
     function removeMembro(reuniaoId, membroId){
       save(reunioes().map(r => r.id === reuniaoId ? { ...r, membros: r.membros.filter(m => m.id !== membroId) } : r));
     }
-    function setPresenca(reuniaoId, membroId, presenca){
-      save(reunioes().map(r => r.id === reuniaoId ? { ...r, membros: r.membros.map(m => m.id === membroId ? { ...m, presenca } : m) } : r));
+    function setPresenca(reuniaoId, membroId, presenca, dia){
+      save(reunioes().map(r => {
+        if (r.id !== reuniaoId) return r;
+        const d = dia || diaAtual(r);
+        return comPresencaGeral({ ...r, membros: r.membros.map(m => m.id === membroId ? { ...m, presencas: { ...(m.presencas || {}), [d]: presenca } } : m) });
+      }));
     }
     function setNomeMembro(reuniaoId, membroId, nome){
       save(reunioes().map(r => r.id === reuniaoId ? { ...r, membros: r.membros.map(m => m.id === membroId ? { ...m, nome } : m) } : r));
@@ -1966,12 +2217,21 @@
       if (tipo === "executiva"){
         registro.cargo = draft.cargo || CARGOS_EXECUTIVOS[0];
         setSlice("comissaoExecutiva", [...(STATE.comissaoExecutiva || []).filter(m => m.cargo !== registro.cargo), { id: uid(), cargo: registro.cargo, nome, ano }]);
+      } else if (tipo === "fiscal"){
+        registro.condicao = draft.condicao || "titular";
+        setSlice("conselhoFiscal", [...(STATE.conselhoFiscal || []), { id: uid(), condicao: registro.condicao, nome, ano }]);
+      } else if (tipo === "gestor"){
+        /* O Comitê Gestor tem 2 membros eleitos (Presidente e Tesoureiro
+           vêm da Comissão Executiva): ocupa a vaga escolhida. */
+        registro.vaga = draft.vaga === "membro2" ? "membro2" : "membro1";
+        setSlice("comiteGestor", { ...(STATE.comiteGestor || { membro1: "", membro2: "" }), [registro.vaga]: nome });
       } else {
         registro.condicao = draft.condicao || "titular";
         const chave = tipo === "supremo" ? "delegadosSupremo" : "delegadosSinodo";
-        setSlice(chave, [...(STATE[chave] || []), { id: uid(), nome, ano, condicao: registro.condicao }]);
+        const categoria = (STATE.pastores || []).some(p => p.nome === nome) ? "pastor" : "presbitero";
+        setSlice(chave, [...(STATE[chave] || []), { id: uid(), nome, ano, condicao: registro.condicao, categoria }]);
       }
-      eleicaoDraft[reuniaoId] = { tipo, cargo: draft.cargo, condicao: draft.condicao, ano, nome: "" };
+      eleicaoDraft[reuniaoId] = { tipo, cargo: draft.cargo, condicao: draft.condicao, vaga: draft.vaga, ano, nome: "" };
       save(reunioes().map(r => r.id === reuniaoId ? { ...r, eleicoes: [registro, ...(r.eleicoes || [])] } : r));
     }
     async function removeEleicao(reuniaoId, eleicaoId){
@@ -2018,49 +2278,60 @@
       save(reunioes().map(r => r.id === reuniaoId ? { ...r, nomeacoes: (r.nomeacoes || []).filter(n => n.id !== nomeacaoId) } : r));
     }
 
-    function printAttendance(r){
-      const rows = r.membros.map(m => `<tr><td>${esc(m.nome)}</td><td>${esc(GRUPOS_REUNIAO.find(g=>g.id===m.grupo) ? GRUPOS_REUNIAO.find(g=>g.id===m.grupo).label : m.grupo)}</td><td>${esc(m.presenca)}</td></tr>`).join("");
-      printDoc(`Lista de presença — reunião de ${fmtDate(r.data)}`, `
-        ${r.local ? `<p style="font-size:12px;color:#7C7460;margin:-8px 0 12px;">${esc(r.local)}</p>` : ""}
-        <table class="print-table"><thead><tr><th>Nome</th><th>Categoria</th><th>Presença</th></tr></thead><tbody>${rows}</tbody></table>
-      `, { watermark: true });
+    /* -- designação de campo (só na Reunião Ordinária de dezembro; vale
+       para o ano seguinte). Também atualiza o cadastro do pastor. -- */
+    function anoDesignacao(r){ return String(((r && r.data) ? Number(r.data.slice(0, 4)) : new Date().getFullYear()) + 1); }
+    function localDesignacaoInfo(designacao){
+      const info = DESIGNACAO_INFO[designacao] || {};
+      if (info.extraField) return { campo: info.extraField, rotulo: info.extraLabel };
+      return { campo: "igreja", rotulo: "Igreja" };
+    }
+    function addDesignacao(reuniaoId){
+      const r = getReuniao(reuniaoId);
+      const draft = designacaoDraft[reuniaoId];
+      if (!r || !draft || !(draft.nome || "").trim()) return;
+      const nome = draft.nome.trim();
+      const designacao = draft.designacao || DESIGNACOES[0];
+      const local = (draft.local || "").trim();
+      const ano = draft.ano || anoDesignacao(r);
+      const pastor = (STATE.pastores || []).find(p => p.nome === nome);
+      if (pastor){
+        const { campo } = localDesignacaoInfo(designacao);
+        setSlice("pastores", (STATE.pastores || []).map(p => p.id === pastor.id ? { ...p, designacao, [campo]: local } : p));
+      }
+      designacaoDraft[reuniaoId] = { designacao, ano, nome: "", local: "" };
+      save(reunioes().map(x => x.id === reuniaoId ? { ...x, designacoes: [{ id: uid(), nome, designacao, local, ano }, ...(x.designacoes || [])] } : x));
+    }
+    async function removeDesignacao(reuniaoId, id){
+      if (!(await confirmModal("Excluir este registro de designação? O cadastro do pastor não é alterado."))) return;
+      save(reunioes().map(r => r.id === reuniaoId ? { ...r, designacoes: (r.designacoes || []).filter(d => d.id !== id) } : r));
     }
 
-    async function printBadges(r){
-      const presentes = r.membros.filter(m => m.presenca === "Presente");
-      if (presentes.length === 0){ await alertModal("Ainda não há presentes registrados nesta reunião."); return; }
-      const cfg = STATE.config || {};
-      const wm = safeImg(cfg.logoDataUrl) ? `<img class="badge-wm" src="${safeImg(cfg.logoDataUrl)}" alt="">` : "";
-      const sigHtml = cfg.secretarioNome ? `
-        <div class="badge-sig">
-          ${safeImg(cfg.assinaturaImagemDataUrl) ? `<img class="badge-sig-img" src="${safeImg(cfg.assinaturaImagemDataUrl)}" alt="Assinatura">` : ""}
-          <div>${esc(cfg.secretarioNome)}</div>
-          <div class="badge-sig-cargo">${esc(cfg.secretarioCargo || "Secretário Executivo")}</div>
-        </div>` : "";
-      const cells = presentes.map(m => {
-        const gi = GRUPOS_REUNIAO.find(g => g.id === m.grupo) || { alinea: "a", rotulo: "membro efetivo" };
-        const textoHtml = montarSegmentosEtiqueta(r, gi).map(s => s.bold ? `<b>${esc(s.text)}</b>` : esc(s.text)).join("");
-        const participacoes = participacoesLinhas(r, m.nome);
-        const participacoesHtml = participacoes.length
-          ? `<div class="badge-participacao">${participacoes.map(p => esc(p)).join("<br>")}</div>` : "";
-        return `
-          <td>
-            <div class="badge-cell">
-              ${wm}
-              <div class="badge-content">
-                <div class="badge-nome">${esc(m.nome)}</div>
-                <div class="badge-texto">${textoHtml}</div>
-                ${participacoesHtml}
-                ${sigHtml}
-              </div>
-            </div>
-          </td>`;
-      });
-      const rows = [];
-      for (let i = 0; i < cells.length; i += 4) rows.push(`<tr>${cells.slice(i, i + 4).join("")}</tr>`);
-      const area = document.getElementById("print-area");
-      area.innerHTML = `<table class="badge-table"><tbody>${rows.join("")}</tbody></table>`;
-      window.print();
+    /* -- registro livre (qualquer outra decisão que deva sair na etiqueta) -- */
+    function addRegistro(reuniaoId){
+      const draft = registroDraft[reuniaoId] || {};
+      const nome = (draft.nome || "").trim(), texto = (draft.texto || "").trim();
+      if (!nome || !texto) return;
+      registroDraft[reuniaoId] = { nome: "", texto: "" };
+      save(reunioes().map(r => r.id === reuniaoId ? { ...r, registros: [{ id: uid(), nome, texto }, ...(r.registros || [])] } : r));
+    }
+    async function removeRegistro(reuniaoId, id){
+      if (!(await confirmModal("Excluir este registro?"))) return;
+      save(reunioes().map(r => r.id === reuniaoId ? { ...r, registros: (r.registros || []).filter(x => x.id !== id) } : r));
+    }
+
+    /* Lista de presença impressa: uma coluna por dia da reunião. */
+    function printAttendance(r){
+      const dias = diasDaReuniao(r);
+      const varios = dias.length > 1;
+      const grupoLabel = m => { const g = GRUPOS_REUNIAO.find(x => x.id === m.grupo); return g ? g.label : m.grupo; };
+      const rows = r.membros.map(m => `<tr><td>${esc(m.nome)}</td><td>${esc(grupoLabel(m))}</td>${dias.map(d => `<td>${esc(presencaNoDia(m, d))}</td>`).join("")}</tr>`).join("");
+      const cab = varios ? dias.map(d => `<th>${esc(fmtDiaSemana(d))}</th>`).join("") : "<th>Presença</th>";
+      printDoc(`Lista de presença — reunião de ${fmtPeriodoCurto(r)}`, `
+        ${r.tipo ? `<p style="font-size:12px;margin:-8px 0 4px;"><b>${esc(r.tipo)}</b></p>` : ""}
+        ${r.local ? `<p style="font-size:12px;color:#6B6350;margin:0 0 12px;">${esc(r.local)}</p>` : ""}
+        <table class="print-table"><thead><tr><th>Nome</th><th>Categoria</th>${cab}</tr></thead><tbody>${rows}</tbody></table>
+      `, { watermark: true });
     }
 
     function membrosEfetivosPresentes(r){
@@ -2126,15 +2397,22 @@
       const nomeSinodo = cfg.siglaSinodo || cfg.nomeSinodo || "Sínodo";
       return `
         <div>
-          <p class="empty-note" style="margin:0 0 10px;">Registre aqui a eleição de membros da Comissão Executiva, de delegados ao Supremo Concílio e de delegados ao ${esc(nomeSinodo)} ocorrida nesta reunião. O resultado aparece na etiqueta de presença do eleito. O campo de ano é o ano da eleição — o mandato começa no ano seguinte.</p>
+          <p class="empty-note" style="margin:0 0 10px;">Registre aqui as eleições desta reunião: Comissão Executiva, Conselho Fiscal, Comitê Gestor e delegados ao Supremo Concílio e ao ${esc(nomeSinodo)}. O resultado aparece na etiqueta de presença do eleito e atualiza Meu presbitério. O campo de ano é o ano da eleição — o mandato começa no ano seguinte.</p>
           <div style="display:grid; grid-template-columns:1.3fr 1fr 90px 1.4fr auto; gap:8px; margin-bottom:10px; align-items:center;">
             <select data-eleicao-tipo="${r.id}">
               <option value="executiva" ${draft.tipo==="executiva"?"selected":""}>Comissão Executiva</option>
+              <option value="fiscal" ${draft.tipo==="fiscal"?"selected":""}>Conselho Fiscal</option>
+              <option value="gestor" ${draft.tipo==="gestor"?"selected":""}>Comitê Gestor</option>
               <option value="supremo" ${draft.tipo==="supremo"?"selected":""}>Delegado ao Supremo Concílio</option>
               <option value="sinodo" ${draft.tipo==="sinodo"?"selected":""}>Delegado ao ${esc(nomeSinodo)}</option>
             </select>
             ${draft.tipo === "executiva" ? `
               <select data-eleicao-cargo="${r.id}">${CARGOS_EXECUTIVOS.map(c => `<option ${draft.cargo===c?"selected":""}>${esc(c)}</option>`).join("")}</select>
+            ` : draft.tipo === "gestor" ? `
+              <select data-eleicao-vaga="${r.id}">
+                <option value="membro1" ${draft.vaga!=="membro2"?"selected":""}>1ª vaga</option>
+                <option value="membro2" ${draft.vaga==="membro2"?"selected":""}>2ª vaga</option>
+              </select>
             ` : `
               <select data-eleicao-condicao="${r.id}">
                 <option value="titular" ${draft.condicao==="titular"?"selected":""}>Titular</option>
@@ -2154,9 +2432,12 @@
             ${list.map(e => `
               <div class="row-card">
                 <span style="display:flex; gap:10px; align-items:center; font-size:13px;">
-                  ${e.tipo === "executiva" ? pillHtml(e.cargo, "gold") : pillHtml(e.tipo === "supremo" ? "Supremo Concílio" : esc(nomeSinodo), "seal")}
+                  ${e.tipo === "executiva" ? pillHtml(e.cargo, "gold")
+                    : e.tipo === "fiscal" ? pillHtml("Conselho Fiscal", "green")
+                    : e.tipo === "gestor" ? pillHtml("Comitê Gestor", "green")
+                    : pillHtml(e.tipo === "supremo" ? "Supremo Concílio" : nomeSinodo, "seal")}
                   <b>${esc(e.nome)}</b>
-                  <span style="color:var(--muted); font-size:12px;">${e.tipo !== "executiva" ? esc(e.condicao) + " · " : ""}${e.tipo === "executiva" ? "mandato " : (e.tipo === "sinodo" ? "biênio " : "quadriênio ")}${esc(mandatoAnoTexto(e.ano, mandatoAnosEleicao(e.tipo, e.cargo)))}</span>
+                  <span style="color:var(--muted); font-size:12px;">${(e.tipo === "fiscal" || e.tipo === "supremo" || e.tipo === "sinodo") ? esc(e.condicao) + " · " : ""}${e.tipo === "sinodo" ? "biênio " : e.tipo === "supremo" ? "quadriênio " : "mandato "}${esc(mandatoAnoTexto(e.ano, mandatoAnosEleicao(e.tipo, e.cargo)))}</span>
                 </span>
                 <button class="btn-icon" data-eleicao-remove="${r.id}:${e.id}">${icon("trash", 14)}</button>
               </div>
@@ -2214,7 +2495,84 @@
       `;
     }
 
+    function designacoesHtml(r){
+      const list = r.designacoes || [];
+      const draft = designacaoDraft[r.id] || (designacaoDraft[r.id] = { designacao: DESIGNACOES[0], ano: anoDesignacao(r), nome: "", local: "" });
+      const { campo, rotulo } = localDesignacaoInfo(draft.designacao);
+      const pastoresNomes = (STATE.pastores || []).map(p => p.nome).filter(Boolean);
+      const opcoesLocal = campo === "igreja" ? (STATE.igrejas || []).map(i => i.nome).filter(Boolean) : [];
+      return `
+        <div>
+          <p class="empty-note" style="margin:0 0 10px;">Designações de campo feitas nesta Reunião Ordinária de dezembro, valendo para o ano seguinte. Cada designação sai na etiqueta do pastor e atualiza a designação no cadastro de Pastores.</p>
+          <div style="display:grid; grid-template-columns:1.4fr 1fr 1.4fr 80px auto; gap:8px; margin-bottom:10px; align-items:center;">
+            <span style="position:relative;">
+              <input placeholder="Pastor — digite ou busque" list="desig-pastores-${r.id}" style="padding-left:28px;" data-desig-nome="${r.id}" value="${esc(draft.nome)}">
+              <span style="position:absolute; left:8px; top:50%; transform:translateY(-50%); color:var(--muted); pointer-events:none;">${icon("search", 13)}</span>
+              <datalist id="desig-pastores-${r.id}">${pastoresNomes.map(nm => `<option value="${esc(nm)}">`).join("")}</datalist>
+            </span>
+            <select data-desig-tipo="${r.id}">${DESIGNACOES.map(d => `<option ${draft.designacao===d?"selected":""}>${esc(d)}</option>`).join("")}</select>
+            <span>
+              <input placeholder="${esc(rotulo)}" ${opcoesLocal.length ? `list="desig-local-${r.id}"` : ""} data-desig-local="${r.id}" value="${esc(draft.local)}">
+              ${opcoesLocal.length ? `<datalist id="desig-local-${r.id}">${opcoesLocal.map(nm => `<option value="${esc(nm)}">`).join("")}</datalist>` : ""}
+            </span>
+            <input type="number" title="Ano da designação" data-desig-ano="${r.id}" value="${esc(draft.ano)}">
+            <button class="btn btn-sm" data-desig-add="${r.id}">${icon("plus", 13)} Registrar</button>
+          </div>
+          ${list.length === 0 ? '<p class="empty-note" style="margin:0;">Nenhuma designação registrada nesta reunião.</p>' : `
+          <div class="list-col">
+            ${list.map(d => `
+              <div class="row-card">
+                <span style="display:flex; gap:10px; align-items:center; font-size:13px; flex-wrap:wrap;">
+                  ${pillHtml(d.designacao, "gold")}
+                  <b>${esc(d.nome)}</b>
+                  <span style="color:var(--muted); font-size:12px;">${esc(textoDesignacao(d))}</span>
+                </span>
+                <button class="btn-icon" data-desig-remove="${r.id}:${d.id}" title="Excluir">${icon("trash", 14)}</button>
+              </div>
+            `).join("")}
+          </div>`}
+        </div>
+      `;
+    }
+
+    function registrosHtml(r){
+      const list = r.registros || [];
+      const draft = registroDraft[r.id] || (registroDraft[r.id] = { nome: "", texto: "" });
+      const nomes = [...new Set(r.membros.map(m => m.nome).filter(Boolean))];
+      return `
+        <div>
+          <p class="empty-note" style="margin:0 0 10px;">Qualquer outra decisão desta reunião que deva constar na etiqueta de uma pessoa (ex.: "Recebido por transferência do PPSP", "Concedida licença"). O texto sai exatamente como digitado.</p>
+          <div style="display:grid; grid-template-columns:1.2fr 2fr auto; gap:8px; margin-bottom:10px; align-items:center;">
+            <span style="position:relative;">
+              <input placeholder="Pessoa — digite ou busque" list="reg-nomes-${r.id}" style="padding-left:28px;" data-reg-nome="${r.id}" value="${esc(draft.nome)}">
+              <span style="position:absolute; left:8px; top:50%; transform:translateY(-50%); color:var(--muted); pointer-events:none;">${icon("search", 13)}</span>
+              <datalist id="reg-nomes-${r.id}">${nomes.map(nm => `<option value="${esc(nm)}">`).join("")}</datalist>
+            </span>
+            <input placeholder="Texto que sairá na etiqueta" maxlength="140" data-reg-texto="${r.id}" value="${esc(draft.texto)}">
+            <button class="btn btn-sm" data-reg-add="${r.id}">${icon("plus", 13)} Registrar</button>
+          </div>
+          ${list.length === 0 ? '<p class="empty-note" style="margin:0;">Nenhum registro livre nesta reunião.</p>' : `
+          <div class="list-col">
+            ${list.map(x => `
+              <div class="row-card">
+                <span style="display:flex; gap:10px; align-items:center; font-size:13px; flex-wrap:wrap;"><b>${esc(x.nome)}</b> <span style="color:var(--ink-soft);">${esc(x.texto)}</span></span>
+                <button class="btn-icon" data-reg-remove="${r.id}:${x.id}" title="Excluir">${icon("trash", 14)}</button>
+              </div>
+            `).join("")}
+          </div>`}
+        </div>
+      `;
+    }
+
     function presencaHtml(r){
+      const dias = diasDaReuniao(r);
+      const dia = diaAtual(r);
+      const varios = dias.length > 1;
+      const tabsDias = varios ? `
+        <div class="dia-tabs" role="tablist" aria-label="Dia da chamada">
+          <span class="dia-label">Chamada do dia:</span>
+          ${dias.map(d => `<button class="btn btn-sm ${d===dia?"btn-primary":""}" role="tab" aria-selected="${d===dia}" data-dia-r="${r.id}|${d}">${esc(fmtDiaSemana(d))}</button>`).join("")}
+        </div>` : "";
       const blocos = [];
       const vistos = new Set();
       GRUPOS_REUNIAO.forEach(g => {
@@ -2223,7 +2581,7 @@
         vistos.add(chave);
         blocos.push({ categoria: g.categoria, grupos: GRUPOS_REUNIAO.filter(x => (x.categoria || x.id) === chave) });
       });
-      return blocos.map(bloco => `
+      return tabsDias + blocos.map(bloco => `
         <div style="margin-top:14px;">
           ${bloco.categoria ? `<p style="font-size:12px; font-weight:700; color:var(--ink); margin:0 0 8px;">${esc(bloco.categoria)}</p>` : ""}
           ${bloco.grupos.map(g => {
@@ -2243,10 +2601,10 @@
                       : `<span>${esc(m.nome)}</span>`;
                     return `
                     <div style="display:flex; justify-content:space-between; align-items:center; font-size:13px; padding:3px 2px; gap:8px;">
-                      <span style="min-width:0;">${nomeCampo}</span>
+                      <span style="min-width:0;">${nomeCampo}${varios ? `<span class="dia-resumo" title="${esc(dias.map(d => fmtDiaSemana(d) + ": " + presencaNoDia(m, d)).join(" · "))}">${dias.map(d => { const st = presencaNoDia(m, d); return `<i class="${st === "Presente" ? "p" : st === "Justificado" ? "j" : "a"}"></i>`; }).join("")}</span>` : ""}</span>
                       <div style="display:flex; gap:5px; align-items:center; flex-shrink:0;">
                         ${PRESENCA_OPCOES.map(op => `
-                          <button class="pill-btn" data-presenca="${r.id}:${m.id}:${op}" style="opacity:${m.presenca===op?1:.35};">
+                          <button class="pill-btn" data-presenca="${r.id}:${m.id}:${op}:${dia}" aria-pressed="${presencaNoDia(m, dia)===op}" style="opacity:${presencaNoDia(m, dia)===op?1:.35};">
                             ${pillHtml(op, PRESENCA_TONE[op], { dot: true, watermark: true })}
                           </button>
                         `).join("")}
@@ -2295,41 +2653,54 @@
       { id: "comissoes", label: "Comissões" },
       { id: "eleicao", label: "Eleição" },
       { id: "nomeacoes", label: "Nomeações" },
+      { id: "designacoes", label: "Designações de campo", so: ehReuniaoDeDesignacoes },
+      { id: "registros", label: "Outros registros" },
     ];
+    function subAbasDa(r){ return SUB_REUNIAO.filter(s => !s.so || s.so(r)); }
 
     function reuniaoCard(r){
       const aberta = ativa === r.id;
-      const presentes = r.membros.filter(m => m.presenca === "Presente").length;
-      const sub = subTabReuniao[r.id] || "presenca";
+      const presentes = r.membros.filter(m => presencaGeral(m, r) === "Presente").length;
+      const abas = subAbasDa(r);
+      const sub = abas.some(s => s.id === subTabReuniao[r.id]) ? subTabReuniao[r.id] : "presenca";
+      const nDias = diasDaReuniao(r).length;
       const numDocs = [...(STATE.documentosEntrada || []), ...(STATE.documentosSaida || [])].filter(d => d.reuniaoId === r.id).length;
       const numComissoes = (r.comissoes || []).length;
       const numEleicoes = (r.eleicoes || []).length;
       const numNomeacoes = (r.nomeacoes || []).length;
-      const contagem = { presenca: null, documentos: numDocs || null, comissoes: numComissoes || null, eleicao: numEleicoes || null, nomeacoes: numNomeacoes || null };
+      const contagem = { presenca: null, documentos: numDocs || null, comissoes: numComissoes || null, eleicao: numEleicoes || null, nomeacoes: numNomeacoes || null,
+        designacoes: (r.designacoes || []).length || null, registros: (r.registros || []).length || null };
       return `
         <div class="acc-card">
           <div class="acc-head" data-toggle-r="${r.id}">
             <div style="font-size:13.5px;">
-              <b>${fmtDate(r.data)}</b> ${r.tipo ? `<span style="color:var(--muted);">· ${esc(r.tipo)}</span>` : ""} ${r.local ? `<span style="color:var(--muted);">· ${esc(r.local)}</span>` : ""}
+              <b>${esc(fmtPeriodoCurto(r))}</b>${nDias > 1 ? ` <span style="color:var(--muted); font-size:12px;">(${nDias} dias)</span>` : ""} ${r.tipo ? `<span style="color:var(--muted);">· ${esc(r.tipo)}</span>` : ""} ${r.local ? `<span style="color:var(--muted);">· ${esc(r.local)}</span>` : ""}
             </div>
             <div style="display:flex; align-items:center; gap:10px;">
-              <span style="font-size:12px; color:var(--muted);">${presentes}/${r.membros.length} presentes</span>
+              <span style="font-size:12px; color:var(--muted);">${presentes}/${r.membros.length} presentes${nDias > 1 ? " (em algum dia)" : ""}</span>
               <button class="btn-icon" data-baixar-etiquetas-r="${r.id}" title="Baixar etiquetas de presença em PDF">${icon("download", 14)}</button>
-              <button class="btn-icon" data-print-badges-r="${r.id}" title="Imprimir etiquetas de presença (para a carteira)">${icon("tag", 14)}</button>
+              <button class="btn-icon" data-print-badges-r="${r.id}" title="Ver e imprimir etiquetas de presença (para a carteira)">${icon("tag", 14)}</button>
               <button class="btn-icon" data-print-r="${r.id}" title="Imprimir lista de presença">${icon("printer", 14)}</button>
               <button class="btn-icon" data-remove-r="${r.id}" title="Excluir">${icon("trash", 14)}</button>
             </div>
           </div>
           ${aberta ? `
           <div class="acc-body">
+            <div class="reuniao-datas">
+              <label>Início <input type="date" data-r-data="${r.id}" value="${esc(r.data || "")}"></label>
+              <label>Término <input type="date" data-r-datafim="${r.id}" min="${esc(r.data || "")}" value="${esc(r.dataFim || "")}" title="Deixe vazio se a reunião for de um dia só"></label>
+              <label class="check"><input type="checkbox" data-r-ordinaria="${r.id}" ${ehReuniaoDeDesignacoes(r) ? "checked" : ""}> Reunião Ordinária de dezembro (designações de campo)</label>
+            </div>
             <div style="display:flex; gap:6px; margin-top:12px; flex-wrap:wrap;">
-              ${SUB_REUNIAO.map(s => `<button class="btn btn-sm ${sub===s.id?"btn-primary":""}" data-subtab-r="${r.id}:${s.id}">${esc(s.label)}${contagem[s.id] ? ` (${contagem[s.id]})` : ""}</button>`).join("")}
+              ${abas.map(s => `<button class="btn btn-sm ${sub===s.id?"btn-primary":""}" data-subtab-r="${r.id}:${s.id}">${esc(s.label)}${contagem[s.id] ? ` (${contagem[s.id]})` : ""}</button>`).join("")}
             </div>
             ${sub === "presenca" ? presencaHtml(r) : ""}
             ${sub === "documentos" ? documentosHtml(r) : ""}
             ${sub === "comissoes" ? `<div style="margin-top:12px;">${comissoesHtml(r)}</div>` : ""}
             ${sub === "eleicao" ? `<div style="margin-top:12px;">${eleicaoHtml(r)}</div>` : ""}
             ${sub === "nomeacoes" ? `<div style="margin-top:12px;">${nomeacoesHtml(r)}</div>` : ""}
+            ${sub === "designacoes" ? `<div style="margin-top:12px;">${designacoesHtml(r)}</div>` : ""}
+            ${sub === "registros" ? `<div style="margin-top:12px;">${registrosHtml(r)}</div>` : ""}
           </div>` : ""}
         </div>
       `;
@@ -2350,8 +2721,9 @@
                 </div>
               </div>
             </div>
-            <div style="display:grid; grid-template-columns:150px 1fr; gap:8px; margin-bottom:8px;">
-              <input type="date" id="in-data" value="${esc(novaData)}">
+            <div style="display:grid; grid-template-columns:150px 150px 1fr; gap:8px; margin-bottom:8px; align-items:end;">
+              <label class="field-label" style="margin:0;">Início<input type="date" id="in-data" value="${esc(novaData)}" style="margin-top:4px;"></label>
+              <label class="field-label" style="margin:0;">Término (opcional)<input type="date" id="in-data-fim" value="${esc(novaDataFim)}" style="margin-top:4px;" title="Deixe vazio se a reunião for de um dia só"></label>
               <input placeholder="Tipo da reunião (ex.: IV Reunião Extraordinária)" id="in-reuniao-tipo" value="${esc(novoTipo)}">
             </div>
             <div style="display:grid; grid-template-columns:1fr auto; gap:8px; margin-bottom:16px;">
@@ -2364,6 +2736,40 @@
           </div>
         `;
         container.querySelector("#in-data").addEventListener("input", e => novaData = e.target.value);
+        container.querySelector("#in-data-fim").addEventListener("input", e => novaDataFim = e.target.value);
+        container.querySelectorAll("[data-r-data]").forEach(el => el.addEventListener("change", e => setDatasReuniao(el.getAttribute("data-r-data"), "data", e.target.value)));
+        container.querySelectorAll("[data-r-datafim]").forEach(el => el.addEventListener("change", e => setDatasReuniao(el.getAttribute("data-r-datafim"), "dataFim", e.target.value)));
+        container.querySelectorAll("[data-r-ordinaria]").forEach(el => el.addEventListener("change", e => setOrdinariaAnual(el.getAttribute("data-r-ordinaria"), e.target.checked)));
+        container.querySelectorAll("[data-dia-r]").forEach(el => el.addEventListener("click", () => {
+          const [rid, dia] = el.getAttribute("data-dia-r").split("|");
+          diaSelecionado[rid] = dia;
+          renderActiveTab();
+        }));
+        container.querySelectorAll("[data-desig-nome]").forEach(el => el.addEventListener("input", e => { designacaoDraft[el.getAttribute("data-desig-nome")].nome = e.target.value; }));
+        container.querySelectorAll("[data-desig-local]").forEach(el => el.addEventListener("input", e => { designacaoDraft[el.getAttribute("data-desig-local")].local = e.target.value; }));
+        container.querySelectorAll("[data-desig-ano]").forEach(el => el.addEventListener("input", e => { designacaoDraft[el.getAttribute("data-desig-ano")].ano = e.target.value; }));
+        container.querySelectorAll("[data-desig-tipo]").forEach(el => el.addEventListener("change", e => {
+          const rid = el.getAttribute("data-desig-tipo");
+          designacaoDraft[rid] = { ...designacaoDraft[rid], designacao: e.target.value, local: "" };
+          renderActiveTab();
+        }));
+        container.querySelectorAll("[data-desig-add]").forEach(el => el.addEventListener("click", () => addDesignacao(el.getAttribute("data-desig-add"))));
+        container.querySelectorAll("[data-desig-remove]").forEach(el => el.addEventListener("click", () => {
+          const [rid, id] = el.getAttribute("data-desig-remove").split(":");
+          removeDesignacao(rid, id);
+        }));
+        container.querySelectorAll("[data-reg-nome]").forEach(el => el.addEventListener("input", e => { registroDraft[el.getAttribute("data-reg-nome")].nome = e.target.value; }));
+        container.querySelectorAll("[data-reg-texto]").forEach(el => el.addEventListener("input", e => { registroDraft[el.getAttribute("data-reg-texto")].texto = e.target.value; }));
+        container.querySelectorAll("[data-reg-texto]").forEach(el => el.addEventListener("keydown", e => { if (e.key === "Enter") addRegistro(el.getAttribute("data-reg-texto")); }));
+        container.querySelectorAll("[data-reg-add]").forEach(el => el.addEventListener("click", () => addRegistro(el.getAttribute("data-reg-add"))));
+        container.querySelectorAll("[data-reg-remove]").forEach(el => el.addEventListener("click", () => {
+          const [rid, id] = el.getAttribute("data-reg-remove").split(":");
+          removeRegistro(rid, id);
+        }));
+        container.querySelectorAll("[data-eleicao-vaga]").forEach(el => el.addEventListener("change", e => {
+          const rid = el.getAttribute("data-eleicao-vaga");
+          eleicaoDraft[rid] = { ...(eleicaoDraft[rid] || {}), vaga: e.target.value };
+        }));
         container.querySelector("#in-local").addEventListener("input", e => novoLocal = e.target.value);
         container.querySelector("#in-reuniao-tipo").addEventListener("input", e => novoTipo = e.target.value);
         container.querySelector("#btn-nova-reuniao").addEventListener("click", criar);
@@ -2379,11 +2785,11 @@
         }));
         container.querySelectorAll("[data-remove-r]").forEach(el => el.addEventListener("click", e => { e.stopPropagation(); removeReuniao(el.getAttribute("data-remove-r")); }));
         container.querySelectorAll("[data-print-r]").forEach(el => el.addEventListener("click", e => { e.stopPropagation(); printAttendance(list.find(r => r.id === el.getAttribute("data-print-r"))); }));
-        container.querySelectorAll("[data-print-badges-r]").forEach(el => el.addEventListener("click", e => { e.stopPropagation(); printBadges(list.find(r => r.id === el.getAttribute("data-print-badges-r"))); }));
+        container.querySelectorAll("[data-print-badges-r]").forEach(el => el.addEventListener("click", e => { e.stopPropagation(); imprimirEtiquetas(list.find(r => r.id === el.getAttribute("data-print-badges-r"))); }));
         container.querySelectorAll("[data-baixar-etiquetas-r]").forEach(el => el.addEventListener("click", e => { e.stopPropagation(); baixarEtiquetas(list.find(r => r.id === el.getAttribute("data-baixar-etiquetas-r"))); }));
         container.querySelectorAll("[data-presenca]").forEach(el => el.addEventListener("click", () => {
-          const [rid, mid, op] = el.getAttribute("data-presenca").split(":");
-          setPresenca(rid, mid, op);
+          const [rid, mid, op, dia] = el.getAttribute("data-presenca").split(":");
+          setPresenca(rid, mid, op, dia);
         }));
         container.querySelectorAll("[data-membro-select]").forEach(el => el.addEventListener("change", e => {
           const [rid, mid] = el.getAttribute("data-membro-select").split(":");
@@ -2862,8 +3268,14 @@
 
     function cfg(){ return STATE.config || DEFAULTS.config; }
 
+    /* A assinatura em imagem saiu das etiquetas (o secretário assina à
+       mão); ao salvar, descarta o que tiver ficado gravado dela. */
+    function semAssinaturaAntiga(c){
+      const { assinaturaImagemDataUrl, assinaturaTipo, ...resto } = c || {};
+      return resto;
+    }
     function salvarConfig(){
-      setSlice("config", { ...cfg(), ...draft });
+      setSlice("config", { ...semAssinaturaAntiga(cfg()), ...draft });
     }
 
     function onLogoFile(file){
@@ -2872,42 +3284,49 @@
       reader.onload = async () => {
         if (!safeImg(reader.result)){ await alertModal("Envie uma imagem PNG, JPG, GIF ou WEBP."); return; }
         draft.logoDataUrl = reader.result;
-        setSlice("config", { ...cfg(), ...draft });
+        setSlice("config", { ...semAssinaturaAntiga(cfg()), ...draft });
       };
       reader.readAsDataURL(file);
     }
     function removerLogo(){
       draft.logoDataUrl = "";
-      setSlice("config", { ...cfg(), ...draft });
+      setSlice("config", { ...semAssinaturaAntiga(cfg()), ...draft });
     }
 
-    function onAssinaturaFile(file){
+    /* Fonte própria da etiqueta (ex.: ZapfHumnst BT, do modelo do Word).
+       O arquivo vai para o Storage privado da conta (ou fica no navegador,
+       no modo local) — nunca para o repositório, que é público. */
+    async function onFonteEtiquetaFile(estilo, file){
       if (!file) return;
-      const reader = new FileReader();
-      reader.onload = async () => {
-        if (!safeImg(reader.result)){ await alertModal("Envie uma imagem PNG para a assinatura."); return; }
-        draft.assinaturaImagemDataUrl = reader.result;
-        draft.assinaturaTipo = "imagem";
-        setSlice("config", { ...cfg(), ...draft });
-      };
-      reader.readAsDataURL(file);
+      if (!/\.ttf$/i.test(file.name)){ await alertModal("Envie o arquivo da fonte no formato .ttf (TrueType)."); return; }
+      if (file.size > 2 * 1024 * 1024){ await alertModal("O arquivo da fonte passa de 2 MB."); return; }
+      try{
+        const { jsPDF } = window.jspdf;
+        const teste = new jsPDF();
+        teste.addFileToVFS("t.ttf", await blobParaBase64(file));
+        teste.addFont("t.ttf", "T", "normal"); teste.setFont("T", "normal"); teste.getTextWidth("Compareceu à reunião");
+      }catch(e){ await alertModal("Este arquivo não pôde ser lido como fonte TrueType. Verifique se é o .ttf correto."); return; }
+      const atual = cfg().fonteEtiqueta || {};
+      const antigo = atual[estilo];
+      let guardado;
+      try{ guardado = await guardarArquivoAnexo(`fonte-etiqueta-${estilo}-${uid()}`, file.name, file); }
+      catch(e){ await alertModal("Não foi possível enviar o arquivo da fonte agora. Tente novamente."); return; }
+      if (antigo) apagarArquivosAnexos([antigo]);
+      const fonteEtiqueta = { ...atual, [estilo]: { id: uid(), nome: file.name, tamanho: file.size, ...guardado } };
+      await setSlice("config", { ...semAssinaturaAntiga(cfg()), ...draft, fonteEtiqueta });
     }
-    function removerAssinatura(){
-      draft.assinaturaImagemDataUrl = "";
-      setSlice("config", { ...cfg(), ...draft });
-    }
-    async function gerarAssinaturaAutomatica(){
-      const nome = (draft.secretarioNome || "").trim();
-      if (!nome){ await alertModal("Informe o nome de quem assina, logo acima, antes de gerar a assinatura."); return; }
-      const dataUrl = await gerarAssinaturaImagem(nome);
-      draft.assinaturaImagemDataUrl = dataUrl;
-      draft.assinaturaTipo = "gerada";
-      await setSlice("config", { ...cfg(), ...draft });
+    async function removerFonteEtiqueta(){
+      const atual = cfg().fonteEtiqueta;
+      if (!atual) return;
+      if (!(await confirmModal("Remover a fonte da etiqueta? As etiquetas voltam a sair em Helvetica."))) return;
+      apagarArquivosAnexos([atual.normal, atual.negrito].filter(Boolean));
+      const { fonteEtiqueta, ...resto } = cfg();
+      await setSlice("config", { ...resto, ...draft });
     }
 
     function renderGeral(container){
       const c = cfg();
-      if (!draft) draft = { nomePresbiterio: c.nomePresbiterio, sigla: c.sigla, infoAdicional: c.infoAdicional, logoDataUrl: c.logoDataUrl, secretarioNome: c.secretarioNome || "", secretarioCargo: c.secretarioCargo || "Secretário Executivo", nomeSinodo: c.nomeSinodo || "", siglaSinodo: c.siglaSinodo || "", assinaturaTipo: c.assinaturaTipo || "imagem", assinaturaImagemDataUrl: c.assinaturaImagemDataUrl || "" };
+      if (!draft) draft = { nomePresbiterio: c.nomePresbiterio, sigla: c.sigla, infoAdicional: c.infoAdicional, logoDataUrl: c.logoDataUrl, secretarioNome: c.secretarioNome || "", secretarioCargo: c.secretarioCargo || "Secretário Executivo", nomeSinodo: c.nomeSinodo || "", siglaSinodo: c.siglaSinodo || "" };
 
       container.innerHTML = `
         <p class="section-sub" style="margin:-4px 0 14px;">Identidade do presbitério usada no cabeçalho, nas impressões e na marca d'água das etiquetas de presença.</p>
@@ -2948,28 +3367,15 @@
         </div>
 
         <div style="margin-top:14px;">
-          <label class="field-label">Assinatura do secretário executivo (aparece nas etiquetas de presença)</label>
-          <div style="display:flex; gap:6px; margin-bottom:10px;">
-            <button type="button" class="btn btn-sm ${draft.assinaturaTipo!=="gerada"?"btn-primary":""}" id="assinatura-modo-imagem">${icon("upload", 13)} Enviar imagem (PNG)</button>
-            <button type="button" class="btn btn-sm ${draft.assinaturaTipo==="gerada"?"btn-primary":""}" id="assinatura-modo-gerada">${icon("pencil", 13)} Gerar a partir do nome</button>
+          <label class="field-label">Fonte das etiquetas de presença (opcional)</label>
+          <p class="section-sub" style="margin:0 0 8px;">Para as etiquetas saírem na mesma letra do seu modelo do Word (ex.: ZapfHumnst BT), envie os arquivos .ttf da fonte normal e da negrito. Eles ficam guardados só na sua conta. Sem fonte enviada, as etiquetas saem em Helvetica.</p>
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            ${["normal", "negrito"].map(estilo => {
+              const f = (cfg().fonteEtiqueta || {})[estilo];
+              return `<label class="btn btn-sm" style="cursor:pointer;">${icon(f ? "check" : "upload", 13)} ${estilo === "normal" ? "Normal" : "Negrito"}: ${f ? esc(f.nome) : "enviar .ttf"}<input type="file" accept=".ttf,font/ttf" data-fonte-etiqueta="${estilo}" style="display:none;"></label>`;
+            }).join("")}
+            ${cfg().fonteEtiqueta ? `<button class="btn btn-sm" id="cfg-fonte-remove">${icon("x", 12)} Remover fonte</button>` : ""}
           </div>
-          ${draft.assinaturaTipo === "gerada" ? `
-            <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-              <div style="border:1px solid var(--line); border-radius:6px; background:#fff; padding:6px 16px; min-height:56px; display:flex; align-items:center;">
-                ${safeImg(draft.assinaturaImagemDataUrl) ? `<img src="${safeImg(draft.assinaturaImagemDataUrl)}" alt="Assinatura gerada" style="height:48px;">` : `<span style="color:var(--muted); font-size:12px;">Nenhuma assinatura gerada ainda.</span>`}
-              </div>
-              <button class="btn btn-sm" id="assinatura-gerar">${icon("check", 13)} Gerar/atualizar assinatura</button>
-              ${draft.assinaturaImagemDataUrl ? `<button class="btn btn-sm" id="cfg-assinatura-remove">${icon("x", 12)} Remover</button>` : ""}
-            </div>
-          ` : `
-            <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-              <div style="border:1px solid var(--line); border-radius:6px; background:#fff; padding:6px 16px; min-height:56px; display:flex; align-items:center;">
-                ${safeImg(draft.assinaturaImagemDataUrl) ? `<img src="${safeImg(draft.assinaturaImagemDataUrl)}" alt="Assinatura enviada" style="height:48px;">` : `<span style="color:var(--muted); font-size:12px;">Nenhuma imagem enviada ainda.</span>`}
-              </div>
-              <label class="btn btn-sm" style="cursor:pointer;">${icon("upload", 13)} Enviar PNG (sem fundo)<input type="file" accept="image/png" id="cfg-assinatura-file" style="display:none;"></label>
-              ${draft.assinaturaImagemDataUrl ? `<button class="btn btn-sm" id="cfg-assinatura-remove">${icon("x", 12)} Remover</button>` : ""}
-            </div>
-          `}
         </div>
 
         <div style="display:grid; grid-template-columns:1.6fr 120px; gap:12px; margin-top:14px;">
@@ -3003,14 +3409,9 @@
       container.querySelector("#cfg-logo-file").addEventListener("change", e => onLogoFile(e.target.files[0]));
       const removeBtn = container.querySelector("#cfg-logo-remove");
       if (removeBtn) removeBtn.addEventListener("click", removerLogo);
-      container.querySelector("#assinatura-modo-imagem").addEventListener("click", () => { draft.assinaturaTipo = "imagem"; renderActiveTab(); });
-      container.querySelector("#assinatura-modo-gerada").addEventListener("click", () => { draft.assinaturaTipo = "gerada"; renderActiveTab(); });
-      const assinaturaFile = container.querySelector("#cfg-assinatura-file");
-      if (assinaturaFile) assinaturaFile.addEventListener("change", e => onAssinaturaFile(e.target.files[0]));
-      const assinaturaRemove = container.querySelector("#cfg-assinatura-remove");
-      if (assinaturaRemove) assinaturaRemove.addEventListener("click", removerAssinatura);
-      const assinaturaGerar = container.querySelector("#assinatura-gerar");
-      if (assinaturaGerar) assinaturaGerar.addEventListener("click", gerarAssinaturaAutomatica);
+      container.querySelectorAll("[data-fonte-etiqueta]").forEach(el => el.addEventListener("change", e => onFonteEtiquetaFile(el.getAttribute("data-fonte-etiqueta"), e.target.files[0])));
+      const fonteRemove = container.querySelector("#cfg-fonte-remove");
+      if (fonteRemove) fonteRemove.addEventListener("click", removerFonteEtiqueta);
       container.querySelector("#cfg-salvar").addEventListener("click", salvarConfig);
     }
 
@@ -3123,6 +3524,122 @@
       container.querySelector("#cf-ano").addEventListener("input", e => formFiscal.ano = e.target.value);
       container.querySelector("#cf-add").addEventListener("click", addFiscal);
       container.querySelectorAll("[data-remove-fiscal]").forEach(el => el.addEventListener("click", () => removeFiscal(el.getAttribute("data-remove-fiscal"))));
+    }
+
+    /* -- delegados ao Sínodo (biênio) e ao Supremo Concílio (quadriênio):
+       titulares e suplentes, pastores e presbíteros, na ordem definida
+       pelo presbitério. A ordem é a posição na lista; uma vaga em aberto
+       fica registrada como "VAGO". Registros antigos (vindos da aba
+       Eleição) sem categoria são classificados pelo cadastro de pastores. -- */
+    const formDelegado = {};
+    function categoriaDelegado(d){
+      if (d.categoria === "pastor" || d.categoria === "presbitero") return d.categoria;
+      return (STATE.pastores || []).some(p => p.nome === d.nome) ? "pastor" : "presbitero";
+    }
+    const BLOCOS_DELEGADOS = [
+      { condicao: "titular", categoria: "pastor", titulo: "Titulares — Pastores" },
+      { condicao: "titular", categoria: "presbitero", titulo: "Titulares — Presbíteros" },
+      { condicao: "suplente", categoria: "pastor", titulo: "Suplentes — Pastores" },
+      { condicao: "suplente", categoria: "presbitero", titulo: "Suplentes — Presbíteros" },
+    ];
+    const noBloco = (d, b) => (d.condicao || "titular") === b.condicao && categoriaDelegado(d) === b.categoria;
+    function addDelegado(chave){
+      const f = formDelegado[chave];
+      const nome = (f.nome || "").trim();
+      if (!f.vago && !nome) return;
+      const novo = { id: uid(), nome: f.vago ? "" : nome, ano: f.ano, condicao: f.condicao, categoria: f.categoria };
+      if (f.vago) novo.vago = true;
+      setSlice(chave, [...(STATE[chave] || []), novo]);
+      formDelegado[chave] = { ...f, nome: "", vago: false };
+      renderActiveTab();
+    }
+    async function removeDelegado(chave, id){
+      if (await confirmModal("Remover este delegado da lista?")) setSlice(chave, (STATE[chave] || []).filter(d => d.id !== id));
+    }
+    /* Troca de lugar com o vizinho do mesmo bloco (titular/suplente ×
+       pastor/presbítero), mantendo a posição dos demais na lista. */
+    function moverDelegado(chave, id, direcao){
+      const lista = [...(STATE[chave] || [])];
+      const i = lista.findIndex(d => d.id === id);
+      if (i < 0) return;
+      const bloco = BLOCOS_DELEGADOS.find(b => noBloco(lista[i], b));
+      const posicoes = lista.map((d, k) => noBloco(d, bloco) ? k : -1).filter(k => k >= 0);
+      const j = posicoes[posicoes.indexOf(i) + direcao];
+      if (j === undefined) return;
+      [lista[i], lista[j]] = [lista[j], lista[i]];
+      setSlice(chave, lista);
+    }
+    function renderDelegados(container, chave, rotulo, anosMandato, nomeMandato){
+      const f = formDelegado[chave] || (formDelegado[chave] = { condicao: "titular", categoria: "pastor", nome: "", vago: false, ano: String(new Date().getFullYear()) });
+      const lista = STATE[chave] || [];
+      const sugestoes = f.categoria === "pastor"
+        ? (STATE.pastores || []).map(p => p.nome).filter(Boolean)
+        : membrosEfetivosGlobais().filter(nm => !(STATE.pastores || []).some(p => p.nome === nm));
+      const blocoHtml = b => {
+        const itens = lista.filter(d => noBloco(d, b));
+        return `
+        <div style="margin-bottom:14px;">
+          <p class="field-label" style="margin-bottom:6px;">${esc(b.titulo)} (${itens.length})</p>
+          ${itens.length === 0 ? '<p class="empty-note" style="margin:0;">Nenhum cadastrado.</p>' : `
+          <div class="list-col">
+            ${itens.map((d, k) => {
+              const mandato = mandatoAnoTexto(d.ano, anosMandato);
+              return `
+              <div class="row-card">
+                <span style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                  <span style="font-family:var(--mono); font-size:12px; color:var(--muted); min-width:22px;">${k + 1}º</span>
+                  ${d.vago ? '<b style="font-style:italic; color:var(--muted);">VAGO</b>' : `<b>${esc(d.nome)}</b>`}
+                  ${mandato ? `<span style="color:var(--muted); font-size:11.5px;">${esc(nomeMandato)} ${esc(mandato)}</span>` : ""}
+                </span>
+                <span style="display:flex; gap:2px; flex-shrink:0;">
+                  <button class="btn-icon" data-deleg-mover="${d.id}:-1" title="Subir" ${k === 0 ? "disabled" : ""}>${icon("chevronDown", 14).replace("<svg", '<svg style="transform:rotate(180deg)"')}</button>
+                  <button class="btn-icon" data-deleg-mover="${d.id}:1" title="Descer" ${k === itens.length - 1 ? "disabled" : ""}>${icon("chevronDown", 14)}</button>
+                  <button class="btn-icon" data-deleg-remove="${d.id}" title="Remover">${icon("trash", 15)}</button>
+                </span>
+              </div>`;
+            }).join("")}
+          </div>`}
+        </div>`;
+      };
+      container.innerHTML = `
+        <p class="section-sub" style="margin:-4px 0 14px;">Representantes do presbitério ${esc(rotulo)}, na ordem definida pelo presbitério. O ano é o da eleição; o ${esc(nomeMandato.toLowerCase())} começa no ano seguinte. Use "Vaga em aberto" para registrar um lugar ainda não preenchido.</p>
+        <div style="display:grid; grid-template-columns:110px 120px 1.6fr auto 90px auto; gap:8px; margin-bottom:16px; align-items:center;">
+          <select id="dl-condicao">
+            <option value="titular" ${f.condicao==="titular"?"selected":""}>Titular</option>
+            <option value="suplente" ${f.condicao==="suplente"?"selected":""}>Suplente</option>
+          </select>
+          <select id="dl-categoria">
+            <option value="pastor" ${f.categoria==="pastor"?"selected":""}>Pastor</option>
+            <option value="presbitero" ${f.categoria==="presbitero"?"selected":""}>Presbítero</option>
+          </select>
+          <span>
+            <input id="dl-nome" list="dl-sugestoes" placeholder="Nome — digite ou busque" value="${esc(f.nome)}" ${f.vago ? "disabled" : ""}>
+            <datalist id="dl-sugestoes">${sugestoes.map(nm => `<option value="${esc(nm)}">`).join("")}</datalist>
+          </span>
+          <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; white-space:nowrap;"><input type="checkbox" id="dl-vago" ${f.vago ? "checked" : ""}> Vaga em aberto</label>
+          <input type="number" id="dl-ano" title="Ano da eleição — o mandato começa no ano seguinte" value="${esc(f.ano)}">
+          <button class="btn btn-primary" id="dl-add">${icon("plus", 14)} Adicionar</button>
+        </div>
+        ${BLOCOS_DELEGADOS.map(blocoHtml).join("")}
+      `;
+      container.querySelector("#dl-condicao").addEventListener("change", e => { f.condicao = e.target.value; });
+      container.querySelector("#dl-categoria").addEventListener("change", e => { f.categoria = e.target.value; renderActiveTab(); });
+      container.querySelector("#dl-nome").addEventListener("input", e => { f.nome = e.target.value; });
+      container.querySelector("#dl-vago").addEventListener("change", e => { f.vago = e.target.checked; renderActiveTab(); });
+      container.querySelector("#dl-ano").addEventListener("input", e => { f.ano = e.target.value; });
+      container.querySelector("#dl-add").addEventListener("click", () => addDelegado(chave));
+      container.querySelectorAll("[data-deleg-mover]").forEach(el => el.addEventListener("click", () => {
+        const [id, dir] = el.getAttribute("data-deleg-mover").split(":");
+        moverDelegado(chave, id, Number(dir));
+      }));
+      container.querySelectorAll("[data-deleg-remove]").forEach(el => el.addEventListener("click", () => removeDelegado(chave, el.getAttribute("data-deleg-remove"))));
+    }
+    function renderDelegadosSinodo(container){
+      const c = cfg();
+      renderDelegados(container, "delegadosSinodo", `ao ${c.nomeSinodo || c.siglaSinodo || "Sínodo"}`, 2, "Biênio");
+    }
+    function renderDelegadosSupremo(container){
+      renderDelegados(container, "delegadosSupremo", "ao Supremo Concílio", 4, "Quadriênio");
     }
 
     /* -- comitê gestor: sempre o presidente e o tesoureiro atuais da
@@ -3405,6 +3922,8 @@
       { grupo: "Órgãos", id: "executiva", label: "Comissão executiva", icon: "user", render: renderExecutiva },
       { grupo: "Órgãos", id: "fiscal", label: "Conselho fiscal", icon: "shield", render: renderFiscal },
       { grupo: "Órgãos", id: "gestor", label: "Comitê gestor", icon: "target", render: renderGestor },
+      { grupo: "Órgãos", id: "sinodo", label: "Delegados ao Sínodo", icon: "users", render: renderDelegadosSinodo },
+      { grupo: "Órgãos", id: "supremo", label: "Delegados ao Supremo", icon: "users", render: renderDelegadosSupremo },
       { grupo: "Comissões e secretarias", id: "secretarias", label: "Secretarias de causas", icon: "clipboard", render: renderSecretarias },
       { grupo: "Comissões e secretarias", id: "permanentes", label: "Comissões permanentes", icon: "layers", render: renderPermanentes },
       { grupo: "Comissões e secretarias", id: "temporarias", label: "Comissões temporárias", icon: "layers", render: renderTemporarias },
